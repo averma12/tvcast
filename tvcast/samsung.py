@@ -1,9 +1,10 @@
-"""Samsung Tizen extras: the WebSocket remote (pairing, keys, text, app launch) and app lookup.
+"""Samsung Tizen extras: the WebSocket remote (pairing, keys, text) and REST app control.
 
 These speak Samsung's own protocol, so they work only with Samsung Tizen TVs. Casting and
 playback controls go through UPnP (upnp.py) and work with any media renderer.
 """
 import base64
+import concurrent.futures
 import contextlib
 import hashlib
 import http.client
@@ -22,6 +23,8 @@ REMOTE_PORT = 8002  # Samsung's WebSocket remote-control channel (TLS, self-sign
 REST_PORT = 8001  # the TV's unauthenticated REST API (device info, per-app status)
 REMOTE_NAME = "TV Cast"  # shown in the TV's pairing prompt and its device list
 PAIR_TIMEOUT = 40  # seconds to wait for someone to press Allow on the TV
+APP_TIMEOUT = 2
+LAUNCH_TIMEOUT = 10
 # Tizen app IDs the panel offers when they're installed. Tizen TVs can ignore the WebSocket
 # request that lists installed apps, so only apps known by ID are looked up.
 KNOWN_APPS = [
@@ -235,23 +238,55 @@ class Remote:
                 "TypeOfRemote": "SendInputString"}})
 
     def apps(self, tv):
-        """The KNOWN_APPS installed on the TV; its REST API answers 404 for missing app IDs."""
-        found = []
-        for app in KNOWN_APPS:
-            url = "http://%s:%d/api/v2/applications/%s" % (tv["ip"], REST_PORT, app["id"])
-            try:
-                with urllib.request.urlopen(url, timeout=5) as resp:
-                    info = json.load(resp)
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    continue
-                raise RuntimeError("checking %s on TV %s failed: HTTP %d" % (app["name"], tv["name"], e.code))
-            except (OSError, ValueError, http.client.HTTPException) as e:  # also non-HTTP or non-JSON replies
-                raise RuntimeError("checking %s on TV %s failed: %s" % (app["name"], tv["name"], e))
-            found.append({"id": app["id"], "name": info.get("name") or app["name"]})
-        return found
+        """Known installed apps, including foreground state. A running app may be in the background."""
+        # Missing apps can take seconds to answer. Bound concurrency so one slow lookup does
+        # not hold up every other app, without adding work to the frequent playback status poll.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            return [app for app in pool.map(lambda a: self.app_status(tv, a["id"]), KNOWN_APPS) if app]
+
+    def app_status(self, tv, app_id):
+        url = app_url(tv, app_id)
+        try:
+            with urllib.request.urlopen(url, timeout=APP_TIMEOUT) as resp:
+                info = json.load(resp)
+            if not isinstance(info, dict) or not isinstance(info.get("name"), str):
+                raise ValueError("expected an app object with a name")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise RuntimeError("checking app %s on TV %s failed: HTTP %d" % (app_id, tv["name"], e.code))
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            raise RuntimeError("checking app %s on TV %s failed: %s" % (app_id, tv["name"], e))
+        return {
+            "id": app_id, "name": info["name"], "version": info.get("version"),
+            "running": info.get("running") if isinstance(info.get("running"), bool) else None,
+            "visible": info.get("visible") if isinstance(info.get("visible"), bool) else None,
+        }
 
     def launch(self, tv, app_id):
-        with self.session(tv) as ws:
-            ws.send({"method": "ms.channel.emit", "params": {
-                "event": "ed.apps.launch", "to": "host", "data": {"appId": app_id, "action_type": "DEEP_LINK"}}})
+        app = self.app_status(tv, app_id)
+        if app is None:
+            raise ValueError("app %s is not installed on TV %s" % (app_id, tv["name"]))
+        # Some Tizen TVs silently ignore ed.apps.launch. Their REST endpoint accepts an empty
+        # POST and can return non-JSON text, so only the subsequent visible flag proves launch.
+        with self.lock:
+            req = urllib.request.Request(app_url(tv, app_id), data=b"", method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=APP_TIMEOUT) as resp:
+                    resp.read(1024)
+            except (OSError, http.client.HTTPException) as e:
+                raise RuntimeError("opening %s on TV %s failed: %s" % (app["name"], tv["name"], e))
+            deadline = time.monotonic() + LAUNCH_TIMEOUT
+            while time.monotonic() < deadline:
+                current = self.app_status(tv, app_id)
+                if current and current["visible"] is True:
+                    return current
+                time.sleep(0.5)
+        raise RuntimeError("TV %s did not confirm that %s opened; check the TV screen and try again"
+                           % (tv["name"], app["name"]))
+
+
+def app_url(tv, app_id):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", app_id):
+        raise ValueError("invalid app ID: %r" % app_id)
+    return "http://%s:%d/api/v2/applications/%s" % (tv["ip"], REST_PORT, app_id)

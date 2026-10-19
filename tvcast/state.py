@@ -1,4 +1,4 @@
-"""Persistent state: library folders, resume points, codec probes, known TVs and preferences."""
+"""Persistent state: library folders, playback queue, resume points, codec probes and known TVs."""
 import json
 import os
 import threading
@@ -22,7 +22,8 @@ class State:
         self.data.setdefault("movies", {})  # resume points, keyed by absolute video path
         self.data.setdefault("probes", {})  # ffprobe summaries, keyed by absolute video path
         self.data.setdefault("tvs", {})  # every TV ever found, keyed by its UPnP device id
-        self.data.setdefault("autoplay", True)
+        self.data.pop("autoplay", None)
+        self.data.setdefault("queue", [])
 
     def get(self, key, default=None):
         with self.lock:

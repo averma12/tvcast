@@ -11,6 +11,7 @@ Log: `~/Library/Logs/tvcast.log` · Settings and resume points: `~/Library/Appli
 | Video plays without sound | The audio is DTS or TrueHD. See [Videos the TV can't play](library.md#videos-the-tv-cant-play). |
 | Subtitles don't show (Samsung) | `tv subs on` again; the TV sometimes says they're on without drawing them. |
 | Remote "refused" | On the TV: **Settings → General → External Device Manager → Device Connection Manager → Device List**, allow TV Cast, then pair again. |
+| App did not confirm it opened | Check the TV for a prompt, then try again. **Refresh** under Apps checks the supported installed apps; an app running in the background is not shown as open. |
 | "Different certificate than when paired" | The TV was reset or updated. Pair again. |
 | `tv install` says "Bootstrap failed: 5" | Run it again. |
 | Video never starts | Check that the macOS firewall isn't set to block all incoming connections. |

@@ -1,7 +1,12 @@
 # Your library
 
-Videos come from `~/Movies` by default. Add or remove folders in the panel under **Library**.
-New videos show up when you open the panel or run `tv open`.
+Videos come from `~/Movies` by default. Manage folder tags under **Folders**; the cross removes
+a folder from the library, without deleting its files.
+Use **Rescan**, reopen the panel or run `tv open` to find new videos. Search by title or year;
+**Continue watching** shows unfinished movies with saved progress.
+
+**Skipped Movies/TV — macOS restricted access** means that subfolder could not be read.
+Other folders are still scanned. Keep ordinary video files in a separate readable folder.
 
 ## Folder layout
 
@@ -24,12 +29,17 @@ Movies/
 - **Skipped:** samples, extras folders (Featurettes, Extras, Trailers, …) and hidden files.
 - **File types:** mp4, m4v, mov, mkv, avi, webm, ts, m2ts, mpg, mpeg, wmv.
 
-## Resume and auto-play
+## Resume and queue
 
 - A movie resumes a few seconds before where you stopped. Use **Start over** or
   `tv open … --from-start` to begin again.
 - Past 95% counts as watched.
-- **Auto-play** (switch in the panel) starts the next movie of a collection when one ends.
+- **Queue** adds a movie without starting it. Use **Play queue** to start, **Play next** to skip,
+  the arrows to reorder, or the cross to remove an entry. **Clear** leaves the current movie playing.
+- The next queued movie starts when the current cast finishes. Stop, TV changes and disconnections
+  leave the remaining queue intact. An empty queue ends playback.
+- The queue survives restarts. Unavailable videos stay listed; reconnect their folder and rescan,
+  or remove them. Failed playback keeps the entry for retry.
 - The Mac stays awake while a movie plays. Closing the lid still puts it to sleep.
 
 ## Videos the TV can't play
