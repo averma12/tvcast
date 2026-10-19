@@ -359,8 +359,10 @@ let tvSig = '', libSig = '', folderSig = '', queueSig = '', refreshId = 0;
 const errors = {};
 const show = (id, text, info = false) => { $(id).textContent = text || ''; $(id).className = 'msg' + (info ? ' info' : ''); };
 const canControl = () => online && !selecting && !!st?.selected;
+// Samsung's remote endpoints can remain reachable when UPnP playback status fails.
+const canUseRemote = () => canControl() && st.remote.available && st.remote.paired;
 const ownsPlayback = () => canControl() && st.now && st.tv?.uri?.includes('/media/' + st.now.id);
-const appsFresh = () => canControl() && !!st.tv && !!appsAt && Date.now() - appsAt < 30000;
+const appsFresh = () => canUseRemote() && !!appsAt && Date.now() - appsAt < 30000;
 
 async function request(url, options = {}, timeout = 120000) {
   const controller = new AbortController();
@@ -399,10 +401,10 @@ function renderStatus() {
   const tv = online ? st.tv : null;
   const visible = appsFresh() && apps?.find(a => a.visible === true);
   const ours = ownsPlayback();
-  $('connection').textContent = !online ? 'Service offline' : !st.selected ? 'No TV selected' : tv ? 'TV connected' : 'TV unreachable';
+  $('connection').textContent = !online ? 'Service offline' : !st.selected ? 'No TV selected' : tv ? 'TV connected' : 'Playback unavailable';
   $('connection').className = 'connection ' + (online && tv ? 'live' : '');
   const launchingName = launching && apps?.find(a => a.id === launching)?.name;
-  $('screen').textContent = launchingName ? `Opening ${launchingName}…` : ours ? 'Casting from your Mac' : visible ? visible.name : !online ? 'Connection lost' : !st.selected ? 'Choose your TV' : !tv ? 'TV off or unreachable' : 'Ready when you are';
+  $('screen').textContent = launchingName ? `Opening ${launchingName}…` : ours ? 'Casting from your Mac' : visible ? visible.name : !online ? 'Connection lost' : !st.selected ? 'Choose your TV' : !tv ? 'TV status unavailable' : 'Ready when you are';
   $('volume').disabled = !canControl() || tv?.volume == null;
   $('mute').disabled = !canControl() || tv?.muted == null;
   if (!volDragging) { $('volume').value = tv?.volume ?? 0; $('volnum').textContent = tv?.volume ?? '—'; }
@@ -521,7 +523,7 @@ function renderRemote() {
     $('typed').value = '';
   }
   const available = st.remote.available, paired = available && st.remote.paired;
-  const enabled = canControl() && paired && !!st.tv;
+  const enabled = canUseRemote();
   $('rstate').textContent = !available ? 'Not available' : pairing ? 'Pairing…' : paired ? 'Paired' : 'Not paired';
   $('pairing').hidden = paired;
   $('pairNote').textContent = !available ? 'Navigation and apps need a Samsung Smart TV. Casting and volume work with other DLNA TVs.' : 'Pair once, then choose Allow on the TV to use its remote.';
@@ -602,7 +604,7 @@ async function refresh() {
 async function poll() { await refresh(); setTimeout(poll, document.hidden ? 10000 : 2000); }
 function togglePlay() { if (ownsPlayback()) act(st.tv.state === 'PLAYING' ? 'pause' : 'play'); }
 function skip(delta) { if (ownsPlayback() && st.tv.duration) act('seek', {seconds:Math.min(Math.max(0, (st.tv.position || 0) + delta), st.tv.duration - 1)}); }
-function remoteKey(key) { if (canControl() && st.remote.paired && st.tv && !launching) act('keys', {keys:[key]}, 'remotemsg'); }
+function remoteKey(key) { if (canUseRemote() && !launching) act('keys', {keys:[key]}, 'remotemsg'); }
 $('tv').onchange = async e => {
   const id = e.target.value;
   selecting = true; appsGeneration++; refreshId++;
@@ -649,10 +651,10 @@ $('playQueue').onclick = async () => {
   opening = null; await refresh();
 };
 document.querySelectorAll('[data-key]').forEach(b => b.onclick = () => remoteKey(b.dataset.key));
-$('refreshApps').onclick = () => { if (!appsLoading) loadApps(); };
+$('refreshApps').onclick = () => { if (canUseRemote() && !appsLoading) loadApps(); };
 $('apps').onclick = async e => {
   const b = e.target.closest('[data-app]');
-  if (!b || launching || !canControl()) return;
+  if (!b || launching || !canUseRemote()) return;
   launching = b.dataset.app;
   const generation = ++appsGeneration;
   appsLoading = false; appsAt = 0; delete errors.appmsg;
@@ -668,7 +670,7 @@ $('apps').onclick = async e => {
 $('pair').onclick = async () => { pairing = true; renderRemote(); await act('pair', {}, 'remotemsg'); pairing = false; appsNext = 0; await refresh(); };
 $('typer').onsubmit = async e => {
   e.preventDefault(); const value = $('typed').value;
-  if (!value || !canControl()) return;
+  if (!value || !canUseRemote()) return;
   const tv = st.selected, result = await act('text', {text:value}, 'remotemsg');
   if (result && tv === st.selected && $('typed').value === value) $('typed').value = '';
 };
