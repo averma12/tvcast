@@ -31,6 +31,8 @@ def discover(timeout=3):
     """Search the network for `timeout` seconds; return the TV records found, sorted by name.
 
     A device whose description can't be read is logged and skipped, so it can't hide the others.
+    Records are deduplicated by (id, ip): a TV answering at several URLs counts once, but
+    different addresses claiming one id all come back, so the caller can spot the conflict.
     """
     tvs = {}
     for location in sorted(search(timeout)):
@@ -39,8 +41,8 @@ def discover(timeout=3):
         except RuntimeError as e:
             log("skipping a device found on the network: %s" % e)
             continue
-        tvs[tv["id"]] = tv
-    return sorted(tvs.values(), key=lambda tv: tv["name"].lower())
+        tvs[tv["id"], tv["ip"]] = tv
+    return sorted(tvs.values(), key=lambda tv: (tv["name"].lower(), tv["ip"]))
 
 
 def search(timeout):

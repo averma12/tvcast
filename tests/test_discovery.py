@@ -118,14 +118,17 @@ class DiscoveryTest(unittest.TestCase):
         self.addCleanup(device.close)
         device.bind(("127.0.0.1", 0))
         device.settimeout(5)
-        pages = ["dmr/renderer.xml", "dmr/renderer.xml", "copy/renderer.xml", "embedded.xml", "gateway.xml"]
+        locations = [self.url(page) for page in
+                     ("dmr/renderer.xml", "dmr/renderer.xml", "copy/renderer.xml", "embedded.xml", "gateway.xml")]
+        # The same id from another address ("localhost" stands in for a second IP) is kept apart.
+        locations.append(self.url("dmr/renderer.xml").replace("127.0.0.1", "localhost"))
         requests = []
 
         def answer():
             request, sender = device.recvfrom(65535)
             requests.append(request)
-            for page in pages:
-                device.sendto(b"HTTP/1.1 200 OK\r\nLOCATION: %s\r\n\r\n" % self.url(page).encode(), sender)
+            for location in locations:
+                device.sendto(b"HTTP/1.1 200 OK\r\nLOCATION: %s\r\n\r\n" % location.encode(), sender)
 
         thread = threading.Thread(target=answer)
         thread.start()
@@ -134,7 +137,8 @@ class DiscoveryTest(unittest.TestCase):
             tvs = discovery.discover(timeout=0.5)
         thread.join()
         self.assertIn(b"ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n", requests[0])
-        self.assertEqual([tv["name"] for tv in tvs], ["Bedroom TV", "Living Room TV"])
+        self.assertEqual([(tv["name"], tv["ip"]) for tv in tvs],
+                         [("Bedroom TV", "127.0.0.1"), ("Living Room TV", "127.0.0.1"), ("Living Room TV", "localhost")])
         self.assertIn("skipping", log.getvalue())
         self.assertIn(self.url("gateway.xml"), log.getvalue())
 

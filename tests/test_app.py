@@ -8,10 +8,12 @@ from unittest import mock
 
 from tvcast import app as appmod
 
+OLD, NEW = "192.0.2.10", "192.0.2.66"
 TV = {
     "id": "uuid:00000000-0000-0000-0000-000000000001", "name": "Living Room TV", "manufacturer": "Samsung Electronics",
-    "model": "", "ip": "192.0.2.10", "location": "http://192.0.2.10:9197/dmr", "services": {},
+    "model": "", "ip": OLD, "location": "http://%s:9197/dmr" % OLD, "services": {},
 }
+MOVED = dict(TV, ip=NEW, location="http://%s:9197/dmr" % NEW)
 
 
 class DiscoverTest(unittest.TestCase):
@@ -23,23 +25,33 @@ class DiscoverTest(unittest.TestCase):
                 port=0, panel_port=0, state=os.path.join(tmp.name, "state.json"), library=[tmp.name]))
         self.app.state.update_tv(TV["id"], remote=True, remote_token="token", remote_cert="pinned", **TV)
 
-    def rediscover_at_new_ip(self, cert):
-        moved = dict(TV, ip="192.0.2.66", location="http://192.0.2.66:9197/dmr")
-        with mock.patch.object(appmod.discovery, "discover", return_value=[moved]), \
-                mock.patch.object(appmod.samsung, "fingerprint", return_value=cert) as fingerprint, \
+    def rediscover(self, records, certs):
+        """Run a search that finds records, where certs maps an IP to the certificate it presents."""
+        with mock.patch.object(appmod.discovery, "discover", return_value=records), \
+                mock.patch.object(appmod.samsung, "fingerprint", side_effect=certs.get), \
+                mock.patch.object(appmod.samsung, "has_remote", return_value=False), \
                 contextlib.redirect_stdout(io.StringIO()) as log:
             found = self.app.discover()
-        fingerprint.assert_called_once_with("192.0.2.66")
         return found, self.app.state.tv(TV["id"]), log.getvalue()
 
-    def test_paired_tv_moves_only_with_its_pinned_certificate(self):
-        found, tv, log = self.rediscover_at_new_ip("another certificate")
-        self.assertEqual((found, tv["ip"]), ([], "192.0.2.10"))
-        self.assertIn("ignoring Living Room TV at 192.0.2.66: its certificate doesn't match the paired TV", log)
+    def test_relay_while_the_paired_tv_still_answers_at_its_old_address(self):
+        found, tv, log = self.rediscover([MOVED], {OLD: "pinned", NEW: "pinned"})
+        self.assertEqual((found, tv["ip"]), ([], OLD))
+        self.assertIn("ignoring Living Room TV at %s: the paired TV still answers at its old address" % NEW, log)
 
-        found, tv, _ = self.rediscover_at_new_ip("pinned")
-        self.assertEqual([t["ip"] for t in found], ["192.0.2.66"])
-        self.assertEqual((tv["ip"], tv["location"], tv["remote_token"]), ("192.0.2.66", "http://192.0.2.66:9197/dmr", "token"))
+    def test_paired_tv_moves_when_its_certificate_moved_with_it(self):
+        found, tv, log = self.rediscover([MOVED], {NEW: "another certificate"})
+        self.assertEqual((found, tv["ip"]), ([], OLD))
+        self.assertIn("its certificate doesn't match the paired TV", log)
+
+        found, tv, _ = self.rediscover([MOVED], {NEW: "pinned"})
+        self.assertEqual([t["ip"] for t in found], [NEW])
+        self.assertEqual((tv["ip"], tv["location"], tv["remote_token"]), (NEW, MOVED["location"], "token"))
+
+    def test_an_id_claimed_from_two_addresses_is_ignored(self):
+        found, tv, log = self.rediscover([TV, MOVED], {NEW: "pinned"})
+        self.assertEqual((found, tv["ip"]), ([], OLD))
+        self.assertEqual(log.count("2 devices answer as Living Room TV"), 2)
 
 
 if __name__ == "__main__":

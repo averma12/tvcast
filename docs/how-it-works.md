@@ -73,8 +73,10 @@ doesn't lose the TV or its pairing.
 - Everything from the network is untrusted. Discovery accepts only `http://` URLs on the device's
   own host, reads at most 1 MB, and rejects XML with a DTD (Apple's Python has no defence
   against XML bombs).
-- Samsung pairing pins the TV's certificate. A paired TV that shows up at a new address is only
-  accepted if it presents the same certificate.
+- Samsung pairing pins the TV's certificate. A paired TV only moves to a new address when its old
+  address stops answering, exactly one device claims to be it, and that device presents the
+  pinned certificate. A device forwarding to the real TV can't pass the first check, because
+  forwarding needs the TV still reachable. Any TV claimed by two addresses at once is ignored.
 - `state.json` holds the pairing token and is readable only by you.
 
 Not protected: anything on your network can pretend to be an *unpaired* TV, and anything holding

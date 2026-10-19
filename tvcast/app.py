@@ -1,5 +1,6 @@
 """The daemon: TV selection, the library, playback tracking with resume points and auto-play,
 and the actions behind the control panel's API."""
+import collections
 import contextlib
 import os
 import queue
@@ -57,6 +58,15 @@ def lan_ip_towards(ip):
             return s.getsockname()[0]
     except OSError as e:
         raise RuntimeError("no network route to TV at %s: %s" % (ip, e))
+
+
+def move_refused(known, ip):
+    """Why a paired TV's record must not move to ip, or None when the move is proven."""
+    if samsung.fingerprint(known["ip"]) == known["remote_cert"]:
+        return "the paired TV still answers at its old address %s" % known["ip"]
+    if samsung.fingerprint(ip) != known["remote_cert"]:
+        return "its certificate doesn't match the paired TV"
+    return None
 
 
 def tv_list(tvs):
@@ -151,14 +161,23 @@ class App:
 
     def discover(self):
         """Search the network for TVs and remember them; returns the TVs found."""
+        records = discovery.discover()
+        claims = collections.Counter(tv["id"] for tv in records)
         found = []
-        for tv in discovery.discover():
+        for tv in records:
             known = self.state.tv(tv["id"]) or {}
-            # Any device on the LAN can answer with a known TV's id, and the stream server serves
-            # whatever address the TV record holds. A paired TV's pinned certificate proves a move;
-            # other TVs have no such anchor, so their address follows discovery.
-            if known.get("remote_cert") and tv["ip"] != known["ip"] and samsung.fingerprint(tv["ip"]) != known["remote_cert"]:
-                log("ignoring %s at %s: its certificate doesn't match the paired TV" % (tv["name"], tv["ip"]))
+            # Any LAN device can claim a known TV's id, and the stream server serves the record's
+            # address. A real TV has one address, so a contested id is ignored. A paired TV moves
+            # only when its certificate left the old address (relaying :8002 needs the real TV
+            # still there) and shows up at the new one; unpaired TVs have no such anchor.
+            if claims[tv["id"]] > 1:
+                why = "%d devices answer as %s" % (claims[tv["id"]], tv["name"])
+            elif known.get("remote_cert") and tv["ip"] != known["ip"]:
+                why = move_refused(known, tv["ip"])
+            else:
+                why = None
+            if why:
+                log("ignoring %s at %s: %s" % (tv["name"], tv["ip"], why))
                 continue
             # A paired TV keeps its remote even when its REST API is slow to answer this time.
             tv["remote"] = samsung.paired(known) or samsung.has_remote(tv["ip"])
