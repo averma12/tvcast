@@ -1,0 +1,12 @@
+#!/usr/bin/python3 -I
+"""TV Cast's command line; run "tv --help" for the commands."""
+import os
+import sys
+
+# -I leaves this script's folder off sys.path, and tv is usually symlinked into PATH, so put the
+# real repo root there to import the tvcast package.
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+
+from tvcast.cli import main  # noqa: E402
+
+main()

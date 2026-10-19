@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion><major>1</major><minor>0</minor></specVersion>
+  <URLBase>http://127.0.0.1:49152/base/</URLBase>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
+    <friendlyName>Media Hub</friendlyName>
+    <manufacturer>Example Audio</manufacturer>
+    <UDN>uuid:00000000-0000-0000-0000-000000000002</UDN>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType>
+        <serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId>
+        <controlURL>ctl/cds</controlURL>
+      </service>
+    </serviceList>
+    <deviceList>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:MediaRenderer:3</deviceType>
+        <friendlyName>Bedroom TV</friendlyName>
+        <manufacturer>Example Audio</manufacturer>
+        <UDN>uuid:00000000-0000-0000-0000-000000000003</UDN>
+        <serviceList>
+          <service>
+            <serviceType>urn:schemas-upnp-org:service:ConnectionManager:3</serviceType>
+            <serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId>
+            <controlURL>ctl/cm</controlURL>
+          </service>
+          <service>
+            <serviceType>urn:schemas-upnp-org:service:AVTransport:3</serviceType>
+            <serviceId>urn:upnp-org:serviceId:AVTransport</serviceId>
+            <controlURL>ctl/avt</controlURL>
+          </service>
+        </serviceList>
+      </device>
+    </deviceList>
+  </device>
+</root>
