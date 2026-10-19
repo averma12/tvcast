@@ -3,15 +3,46 @@
 Play the videos on your Mac on any TV in your home. No app on the TV, no cloud, no converting.
 Control it from a web page or the `tv` command. On Samsung TVs it also works as a remote.
 
+![TV Cast with playback controls, a queue and removable folder tags](https://raw.githubusercontent.com/thepushkarp/tvcast/main/docs/images/demo-dark.jpg)
+
+<details>
+<summary>Light theme</summary>
+
+![TV Cast in light mode](https://raw.githubusercontent.com/thepushkarp/tvcast/main/docs/images/demo-light.jpg)
+
+</details>
+
+Screenshots use a demo library and simulated TV.
+
 ## Quick start
 
+Needs macOS with the Command Line Tools (`xcode-select --install`).
+
+Install with [uv](https://docs.astral.sh/uv/):
+
 ```sh
-git clone <repo-url> ~/Projects/tvcast     # not in Documents, Desktop or Downloads
-cd ~/Projects/tvcast
-./tv install                               # starts now and at every login
-ln -s "$PWD/tv" ~/.local/bin/tv            # or any folder on your PATH
-tv ui                                      # open the control panel
+uv tool install tvcast
+tv install                 # starts now and at every login
+tv ui                      # open the control panel
 ```
+
+`pipx install tvcast` also works. The package has no runtime dependencies.
+Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
+
+<details>
+<summary>Run from source</summary>
+
+```sh
+git clone https://github.com/thepushkarp/tvcast.git ~/Projects/tvcast
+cd ~/Projects/tvcast
+./tv install
+./tv ui
+```
+
+Keep the checkout outside Documents, Desktop and Downloads; macOS restricts login services
+there. To use `tv` from any folder, symlink it into a directory on your `PATH`.
+
+</details>
 
 In the panel:
 
@@ -23,9 +54,6 @@ In the panel:
 The panel shows the TV's volume, mute state and current supported app. Use **Apps** to switch;
 **Open on TV** appears only after the TV confirms it. Search your library or choose
 **Continue watching** to find unfinished movies. Add movies to **Queue** to play them in order.
-
-Needs macOS with the Command Line Tools (`xcode-select --install`).
-Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
 
 ## Everyday commands
 
@@ -44,6 +72,15 @@ Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
 
 `tv --help` lists everything. To remove TV Cast: `tv uninstall`.
 
+## Updates
+
+Stop any active cast, then run `uv tool upgrade tvcast` (or `pipx upgrade tvcast`) followed by
+`tv install` to restart the login service with the installed version. `tv --version` shows the
+CLI version. Settings, pairing and playback history stay in Application Support.
+
+Before removing the package, run `tv uninstall`, then `uv tool uninstall tvcast` or
+`pipx uninstall tvcast`.
+
 ## What works on which TV
 
 | | Any DLNA TV | Samsung (2016 or newer) |
@@ -54,6 +91,9 @@ Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
 
 ## More
 
-- [Your library](docs/library.md): folders, subtitles, resume and queue
-- [Troubleshooting](docs/troubleshooting.md)
-- [How it works](docs/how-it-works.md): for developers
+- [Your library](https://github.com/thepushkarp/tvcast/blob/main/docs/library.md): folders, subtitles, resume and queue
+- [Troubleshooting](https://github.com/thepushkarp/tvcast/blob/main/docs/troubleshooting.md)
+- [How it works](https://github.com/thepushkarp/tvcast/blob/main/docs/how-it-works.md): for developers
+- [Releasing](https://github.com/thepushkarp/tvcast/blob/main/docs/releasing.md)
+
+MIT licensed. Bundled icons retain their [Lucide and Feather notices](https://github.com/thepushkarp/tvcast/blob/main/LICENSE-ICONS).

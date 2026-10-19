@@ -23,6 +23,7 @@ so they never disagree.
 | File | Job |
 |---|---|
 | `tv` | Entry script. Adds the repo to `sys.path` and calls `cli.main()`. |
+| `tvcast/launcher.py` | Installed `tv` entry point and login-service bootstrap, using Apple's isolated Python. |
 | `tvcast/cli.py` | The `tv` command: API client, plus `daemon`, `install` and `uninstall`. |
 | `tvcast/app.py` | The daemon: TV selection, playback tracking, resume points, API actions. |
 | `tvcast/server.py` | HTTP handlers: the stream server and the panel API. |
@@ -51,9 +52,11 @@ doesn't lose the TV or its pairing.
 
 - **Apple's `/usr/bin/python3` only (3.9, standard library).** The TV connects *to* the Mac to
   download the video, and the macOS firewall lets Apple-signed programs accept that without a
-  prompt. A background service can't answer a prompt.
+  prompt. A background service can't answer a prompt. The installed CLI re-executes through
+  this interpreter; the login service points to the bootstrap inside the installed package.
 - **`-I` and the `sys.path` line in `tv`.** Isolated mode ignores the user's Python environment,
-  but it also drops the script's own folder from the import path.
+  but it also drops the script's own folder from the import path. The packaged launcher adds
+  its installation directory explicitly, so Apple's Python can load it from a uv/pipx environment.
 - **Never restart mid-movie.** The TV gives up when its stream connection drops. `tv install`
   refuses while something plays, and the panel page is read from disk on every load, so UI edits
   need no restart.
