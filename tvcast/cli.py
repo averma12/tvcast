@@ -204,6 +204,7 @@ def main():
         return sub.add_parser(name, parents=list(parents), help=help, description=help)
 
     command("status", "show the selected TV, what it plays, the position and the volume")
+    command("ui", "open the control panel in your browser")
     c = command("tvs", "list known TVs; * marks the selected one")
     c.add_argument("--find", action="store_true", help="search the network first")
     c = command("use", "select a TV by its number in tv tvs or part of its name")
@@ -244,6 +245,9 @@ def main():
         uninstall()
     elif args.cmd == "status":
         show_status(args.panel_port)
+    elif args.cmd == "ui":
+        api(args.panel_port, "status")  # exits with the usual message when the daemon isn't running
+        subprocess.run(["/usr/bin/open", "http://127.0.0.1:%d" % args.panel_port], check=True)
     elif args.cmd == "tvs":
         list_tvs(args.panel_port, args.find)
     elif args.cmd == "use":
