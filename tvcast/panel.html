@@ -28,6 +28,7 @@
   header, .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
   header { padding-bottom: 24px; border-bottom: 1px solid var(--line); }
   h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.6px; white-space: nowrap; }
+  .local-time { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; white-space: nowrap; }
   h2 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 650; letter-spacing: -.35px; }
   h3 { margin: 26px 0 4px; font-size: 14px; font-weight: 650; }
   p { margin: 0; }
@@ -41,6 +42,7 @@
   .primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
   .primary:hover:not(:disabled) { background: var(--accent); filter: brightness(.93); }
   .picker { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .picker button { width: 108px; flex: none; white-space: nowrap; }
   select { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); min-height: 44px; padding: 10px 34px 10px 14px; min-width: 0; max-width: 320px; text-overflow: ellipsis; font-size: 13px; line-height: 1.4; }
 
   .select-wrap { position: relative; display: inline-grid; min-width: 0; }
@@ -53,7 +55,7 @@
     mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20%3E%20%3Cpath%20d%3D%22m6%209%206%206%206-6%22%20%2F%3E%20%3C%2Fsvg%3E") center / contain no-repeat;
   }
   .statusbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px 0; }
-  .statusbar h2 { margin-top: 3px; font-size: 25px; overflow-wrap: anywhere; }
+  .statusbar h2 { font-size: 25px; overflow-wrap: anywhere; }
   .caption, .note, .count { font-size: 13px; color: var(--muted); }
   .count { font-weight: 400; margin-left: 8px; }
   .connection { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
@@ -69,7 +71,7 @@
   .volume { padding: 18px 0 20px; border-bottom: 1px solid var(--line); }
   .volume .row { margin-bottom: 8px; }
   .volume-controls { display: flex; align-items: center; gap: 12px; }
-  .volume-controls button { min-width: 74px; }
+  .volume-controls button { width: 84px; flex: none; }
   output { min-width: 3ch; text-align: right; font-size: 14px; font-variant-numeric: tabular-nums; }
   input[type=range] { flex: 1; min-width: 0; width: 100%; height: 30px; margin: 0; accent-color: var(--accent); cursor: pointer; }
   .dpad { display: grid; grid-template: repeat(3, 58px) / repeat(3, 64px); gap: 4px; width: max-content; margin: 22px auto; }
@@ -84,11 +86,14 @@
   .keys + .keys { margin-top: 8px; }
   .keys button { padding-inline: 4px; }
   .apps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-  .apps button { text-align: left; padding: 12px 14px; min-height: 60px; }
-  .apps button small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 2px; }
+  .apps button { text-align: left; padding: 12px 14px; min-height: 60px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .apps button small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; }
   .apps button[aria-current=true] { background: var(--active); border-color: var(--accent); }
   .app-heading { margin-top: 24px; }
   .link-button { border: none; padding: 8px; min-height: 40px; color: var(--accent); font-size: 12px; }
+  #rescan, #refreshApps { width: 88px; flex: none; white-space: nowrap; }
+  #pair, #addFolder, #playQueue { width: 112px; flex: none; white-space: nowrap; }
+  #tvoff { width: 148px; white-space: nowrap; }
   details { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 14px; }
   summary { color: var(--muted); font-size: 13px; min-height: 40px; padding-block: 8px; }
   details[open] > summary { margin-bottom: 12px; }
@@ -120,6 +125,9 @@
   .meta { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 4px; font-size: 12px; color: var(--muted); }
   .actions { display: flex; gap: 6px; flex: none; }
   .actions button { min-width: 58px; }
+  .lib .actions { max-width: 100%; flex-wrap: wrap; }
+  [data-open]:not([data-from-start]) { width: 100px; flex: none; white-space: nowrap; }
+  [data-queue] { width: 80px; flex: none; white-space: nowrap; }
   .tag { display: inline-block; color: var(--accent); font-size: 11px; margin-left: 8px; }
   .bar { height: 3px; margin-top: 8px; background: var(--control); border-radius: 3px; overflow: hidden; }
   .bar span { display: block; height: 100%; background: var(--accent); }
@@ -165,8 +173,9 @@
   @media (max-width: 640px) {
     main { padding: 18px 16px 28px; }
     header { flex-wrap: wrap; padding-bottom: 18px; }
-    .picker { flex: 1; justify-content: flex-end; }
-    .picker .select-wrap { flex: 1; max-width: 210px; }
+    .brand { flex-basis: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .picker { flex: 1 0 100%; }
+    .picker .select-wrap { flex: 1; }
     .picker select { font-size: 12px; }
     .picker button { flex: none; padding-inline: 9px; }
     .statusbar { padding: 20px 0; align-items: flex-start; }
@@ -238,14 +247,14 @@ SOFTWARE.
 <body>
 <main>
   <header>
-    <h1>TV Cast</h1>
+    <div class="brand"><h1>TV Cast</h1><time class="local-time" id="localTime"></time></div>
     <div class="picker">
       <span class="select-wrap"><select id="tv" aria-label="TV" hidden></select></span>
       <button id="find">Find TVs</button>
     </div>
   </header>
   <div class="statusbar">
-    <div><p class="caption">On your TV</p><h2 id="screen">Connecting…</h2><p class="note" id="screenNote"></p></div>
+    <h2 id="screen">Connecting…</h2>
     <span class="connection" id="connection">Checking TV</span>
   </div>
   <p class="msg" id="globalmsg" role="status"></p>
@@ -322,6 +331,15 @@ SOFTWARE.
 </main>
 <script>
 const $ = id => document.getElementById(id);
+const dateTimeFormat = new Intl.DateTimeFormat(undefined, {dateStyle:'medium', timeStyle:'short'});
+function updateDateTime() {
+  const now = new Date();
+  $('localTime').dateTime = now.toISOString();
+  $('localTime').textContent = dateTimeFormat.format(now);
+  $('localTime').title = dateTimeFormat.resolvedOptions().timeZone;
+  setTimeout(updateDateTime, 60000 - Date.now() % 60000);
+}
+updateDateTime();
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
 const clock = s => {
   if (s == null) return '—';
@@ -385,7 +403,6 @@ function renderStatus() {
   $('connection').className = 'connection ' + (online && tv ? 'live' : '');
   const launchingName = launching && apps?.find(a => a.id === launching)?.name;
   $('screen').textContent = launchingName ? `Opening ${launchingName}…` : ours ? 'Casting from your Mac' : visible ? visible.name : !online ? 'Connection lost' : !st.selected ? 'Choose your TV' : !tv ? 'TV off or unreachable' : 'Ready when you are';
-  $('screenNote').textContent = ours ? (STATES[tv.state] || 'Cast playback') : visible ? 'App open on TV' : tv ? 'Use the remote or play a movie from your Mac.' : 'Turn the TV on and connect to the same network.';
   $('volume').disabled = !canControl() || tv?.volume == null;
   $('mute').disabled = !canControl() || tv?.muted == null;
   if (!volDragging) { $('volume').value = tv?.volume ?? 0; $('volnum').textContent = tv?.volume ?? '—'; }
@@ -463,7 +480,7 @@ function renderLibrary() {
   }
   $('addFolder').disabled = choosingFolder || !online;
   document.querySelectorAll('[data-remove]').forEach(b => b.disabled = !online);
-  $('addFolder').textContent = choosingFolder ? 'Choose a folder on your Mac…' : 'Add folder';
+  $('addFolder').textContent = choosingFolder ? 'Choosing…' : 'Add folder';
   show('libmsg', errors.libmsg);
 }
 function renderQueue() {
@@ -510,7 +527,7 @@ function renderRemote() {
   $('pairNote').textContent = !available ? 'Navigation and apps need a Samsung Smart TV. Casting and volume work with other DLNA TVs.' : 'Pair once, then choose Allow on the TV to use its remote.';
   $('pair').hidden = !available;
   $('pair').disabled = pairing || !canControl();
-  $('pair').textContent = pairing ? 'Accept the prompt on TV…' : 'Pair with TV';
+  $('pair').textContent = pairing ? 'Pairing…' : 'Pair with TV';
   $('remoteControls').hidden = !paired;
   document.querySelectorAll('[data-key]').forEach(b => b.disabled = !enabled || !!launching);
   $('sendText').disabled = !enabled;
