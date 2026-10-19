@@ -3,670 +3,610 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>TV Cast</title>
 <style>
   :root {
-    --bg: #f5f4f0; --card: #ffffff; --text: #1c1b19; --muted: #6f6d66; --line: #e4e1d8;
-    --track: #e9e6dd; --accent: #9a6a14; --accent-soft: #f3e7cf; --warn: #b4441c;
+    --bg: #f4f6f8; --surface: #fff; --control: #e9edf2; --text: #20252c;
+    --muted: #596575; --line: #d4dce5; --accent: #315f9f; --active: #e6eefb;
+    --warning: #865800; --warning-bg: #fff3d9; --error: #ad3544;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #131312; --card: #1d1c1a; --text: #edebe5; --muted: #9c998f; --line: #2f2d29;
-      --track: #34322d; --accent: #e3aa45; --accent-soft: #3a2e18; --warn: #f08a5d;
+      --bg: #20252c; --surface: #2b323b; --control: #353f4b; --text: #f4f6f8;
+      --muted: #afbac7; --line: #46515e; --accent: #9bbdf2; --active: #354963;
+      --warning: #edc278; --warning-bg: #483e2c; --error: #ff9aa5;
       color-scheme: dark;
     }
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
-  main { max-width: 680px; margin: 0 auto; padding: 32px 16px 48px; display: grid; gap: 16px; }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 0 4px; }
-  .brand { flex: none; font-size: 13px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-  .picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  h1 { font-size: 21px; line-height: 1.3; font-weight: 650; margin: 12px 0 20px; text-wrap: balance; }
-  h1.idle { color: var(--muted); }
-  h2 { font-size: 15px; font-weight: 650; margin: 0; }
-  h3 { font-size: 12px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 22px 0 2px; }
-  h3 .count { font-weight: 500; margin-left: 4px; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
-    font-size: 12px; font-weight: 600; background: var(--track); color: var(--muted);
-  }
-  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-  .pill.live { background: var(--accent-soft); color: var(--accent); }
-  .pill.bad { color: var(--warn); }
+  body { margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1120px; margin: auto; padding: 30px 28px 48px; }
+  header, .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  header { padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -.6px; white-space: nowrap; }
+  h2 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 650; letter-spacing: -.35px; }
+  h3 { margin: 26px 0 4px; font-size: 14px; font-weight: 650; }
+  p { margin: 0; }
+  button, input, select { font: inherit; color: inherit; }
+  button, select, summary { cursor: pointer; }
+  button { border: 1px solid var(--line); background: transparent; border-radius: 10px; min-height: 44px; padding: 10px 14px; font-size: 13px; font-weight: 600; line-height: 1.4; }
+  button:hover:not(:disabled) { background: var(--control); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled, input:disabled, select:disabled { opacity: .45; cursor: default; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .primary:hover:not(:disabled) { background: var(--accent); filter: brightness(.93); }
+  .picker { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  select { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); min-height: 44px; padding: 10px 34px 10px 14px; min-width: 0; max-width: 320px; text-overflow: ellipsis; font-size: 13px; line-height: 1.4; }
 
-  input[type=range] {
-    -webkit-appearance: none; appearance: none; width: 100%; height: 6px; margin: 0;
-    border-radius: 999px; cursor: pointer; outline: none;
-    background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--track) var(--p, 0%));
+  .select-wrap { position: relative; display: inline-grid; min-width: 0; }
+  .select-wrap:has(select[hidden]) { display: none; }
+  .select-wrap select { appearance: none; width: 100%; max-width: none; padding-right: 40px; }
+  .select-wrap:has(select:disabled)::after { opacity: .45; }
+  .select-wrap::after {
+    content: ""; position: absolute; right: 14px; top: 50%; width: 16px; height: 16px;
+    transform: translateY(-50%); pointer-events: none; background: var(--muted);
+    mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20%3E%20%3Cpath%20d%3D%22m6%209%206%206%206-6%22%20%2F%3E%20%3C%2Fsvg%3E") center / contain no-repeat;
   }
-  input[type=range]::-webkit-slider-thumb {
-    -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-    background: var(--card); border: 2px solid var(--accent); box-shadow: 0 1px 3px rgb(0 0 0 / .25);
-  }
-  input[type=range]::-moz-range-thumb {
-    width: 12px; height: 12px; border-radius: 50%;
-    background: var(--card); border: 2px solid var(--accent);
-  }
-  input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
-  input:disabled, button:disabled { opacity: .45; cursor: default; }
-
-  .times {
-    display: flex; justify-content: space-between; margin-top: 8px; min-height: 1.45em;
-    font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
-  }
-  .controls { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 20px 0 6px; }
-  button, select { font: inherit; color: inherit; background: none; cursor: pointer; }
-  .btn {
-    height: 34px; min-width: 52px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px;
-    font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
-  }
-  .controls .btn { height: 38px; min-width: 58px; }
-  .btn:hover:not(:disabled) { background-color: var(--track); }
-  /* background-color above, not the shorthand, so hovering keeps this caret. */
-  select.btn {
-    -webkit-appearance: none; appearance: none; min-width: 0; padding-right: 30px; overflow: hidden; text-overflow: ellipsis;
-    background: linear-gradient(45deg, transparent 50%, var(--muted) 50%) calc(100% - 18px) 55% / 5px 5px no-repeat,
-      linear-gradient(135deg, var(--muted) 50%, transparent 50%) calc(100% - 13px) 55% / 5px 5px no-repeat;
-  }
-  .btn.primary { background: var(--text); border-color: var(--text); color: var(--card); }
-  .btn.primary:hover:not(:disabled) { background: var(--text); opacity: .85; }
-  .btn.danger { color: var(--warn); border-color: var(--warn); }
-  .btn.danger.armed, .btn.danger:hover:not(:disabled) { background: var(--warn); color: var(--card); }
-  .big {
-    width: 60px; height: 60px; border: none; border-radius: 50%; margin: 0 6px;
-    display: grid; place-items: center; background: var(--text); color: var(--card);
-  }
-  .big svg { width: 26px; height: 26px; }
-  .vol { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-  .icon { width: 36px; height: 36px; flex: none; border: none; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
-  .icon:hover:not(:disabled) { background: var(--track); }
-  .icon.on { color: var(--warn); }
-  .icon svg { width: 22px; height: 22px; }
-  .num { min-width: 2.5ch; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-  .subs { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
-  .subs .left { display: flex; align-items: center; gap: 12px; }
-  .subs > .btn { margin-left: auto; }
-  .label { font-size: 13px; color: var(--muted); }
-  .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--track); }
-  .seg button { border: none; border-radius: 999px; padding: 5px 16px; font-size: 13px; font-weight: 600; color: var(--muted); }
-  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .2); }
-  .msg { min-height: 1.2em; margin: 12px 0 0; font-size: 13px; color: var(--warn); }
-  .msg:empty { min-height: 0; margin: 0; }
-  .msg.info { color: var(--muted); }
-
-  .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
-  .switch input {
-    -webkit-appearance: none; appearance: none; position: relative; width: 34px; height: 20px; margin: 0;
-    border-radius: 999px; background: var(--track); cursor: pointer; transition: background .15s;
-  }
-  .switch input::after {
-    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
-    background: var(--card); box-shadow: 0 1px 2px rgb(0 0 0 / .3); transition: transform .15s;
-  }
-  .switch input:checked { background: var(--accent); }
-  .switch input:checked::after { transform: translateX(14px); }
-  .switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-  .folders { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 4px 0 12px;
-    border-radius: 999px; background: var(--track); font-size: 13px; font-weight: 600; max-width: 100%;
-  }
-  .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip button { width: 24px; height: 24px; border: none; border-radius: 50%; color: var(--muted); font-size: 16px; line-height: 1; }
-  .chip button:hover { background: var(--line); color: var(--text); }
-  .note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
-  .lib { list-style: none; margin: 4px 0 0; padding: 0; }
-  .lib li { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
-  .lib li:first-child { border-top: none; }
-  .lib .info { flex: 1; min-width: 0; }
-  .lib .name { font-weight: 600; }
-  .lib li.current .name { color: var(--accent); }
-  .lib li.problem .name { color: var(--muted); }
-  .lib .meta { margin-top: 2px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
-  .lib .meta .warn { color: var(--warn); }
-  .lib .bar { height: 3px; margin-top: 7px; border-radius: 2px; background: var(--track); overflow: hidden; }
-  .lib .bar span { display: block; height: 100%; background: var(--accent); }
-  .lib .actions { display: flex; flex: none; gap: 6px; }
-  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
-  .tag { margin-left: 6px; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
-
-  .remote { display: grid; grid-template-columns: auto 1fr; gap: 18px 28px; align-items: center; margin-top: 16px; }
-  .dpad { display: grid; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); gap: 6px; }
-  .dpad button { border: 1px solid var(--line); border-radius: 12px; font-size: 16px; }
-  .dpad button:hover { background: var(--track); }
-  .dpad .ok { border-radius: 50%; background: var(--text); color: var(--card); border-color: var(--text); font-size: 13px; font-weight: 650; }
-  .dpad .up { grid-area: 1 / 2; } .dpad .left { grid-area: 2 / 1; } .dpad .ok { grid-area: 2 / 2; }
-  .dpad .right { grid-area: 2 / 3; } .dpad .down { grid-area: 3 / 2; }
-  .keys { display: flex; flex-wrap: wrap; gap: 8px; }
+  .statusbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px 0; }
+  .statusbar h2 { margin-top: 3px; font-size: 25px; overflow-wrap: anywhere; }
+  .caption, .note, .count { font-size: 13px; color: var(--muted); }
+  .count { font-weight: 400; margin-left: 8px; }
+  .connection { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .connection::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .connection.live { color: var(--accent); }
+  .workspace { display: grid; grid-template-columns: 310px minmax(0, 1fr); gap: 40px; align-items: start; }
+  .remote-panel { background: var(--surface); border-radius: 22px; padding: 22px; position: sticky; top: 22px; }
+  .remote-panel:has(details[open]) { position: static; }
+  .remote-panel h2 { font-size: 16px; }
+  .badge { display: inline-block; font-size: 12px; color: var(--muted); }
+  .sound-state { padding: 3px 8px; background: var(--control); border-radius: 6px; font-size: 12px; }
+  .sound-state.muted { background: var(--warning-bg); color: var(--warning); }
+  .volume { padding: 18px 0 20px; border-bottom: 1px solid var(--line); }
+  .volume .row { margin-bottom: 8px; }
+  .volume-controls { display: flex; align-items: center; gap: 12px; }
+  .volume-controls button { min-width: 74px; }
+  output { min-width: 3ch; text-align: right; font-size: 14px; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; min-width: 0; width: 100%; height: 30px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .dpad { display: grid; grid-template: repeat(3, 58px) / repeat(3, 64px); gap: 4px; width: max-content; margin: 22px auto; }
+  .dpad button { border: none; background: var(--control); border-radius: 14px; color: var(--muted); }
+  .dpad button:hover:not(:disabled) { color: var(--text); background: var(--active); }
+  .dpad .up { grid-area: 1 / 2; border-radius: 20px 20px 10px 10px; }
+  .dpad .left { grid-area: 2 / 1; border-radius: 20px 10px 10px 20px; }
+  .dpad .ok { grid-area: 2 / 2; background: var(--accent); color: var(--bg); border-radius: 50%; }
+  .dpad .right { grid-area: 2 / 3; border-radius: 10px 20px 20px 10px; }
+  .dpad .down { grid-area: 3 / 2; border-radius: 10px 10px 20px 20px; }
+  .keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .keys + .keys { margin-top: 8px; }
-  .group-label { font-size: 12px; color: var(--muted); margin: 18px 0 8px; }
-  .apps { display: flex; flex-wrap: wrap; gap: 8px; }
-  .typer { display: flex; gap: 8px; }
-  .typer input {
-    flex: 1; min-width: 0; height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--text); font: inherit; font-size: 14px;
-  }
-  .typer input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; margin: 18px 0 0; }
-  .stats dt { font-size: 12px; color: var(--muted); }
-  .stats dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-  .warn { color: var(--warn); }
-  .file { margin: 16px 0 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .keys button { padding-inline: 4px; }
+  .apps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .apps button { text-align: left; padding: 12px 14px; min-height: 60px; }
+  .apps button small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; margin-top: 2px; }
+  .apps button[aria-current=true] { background: var(--active); border-color: var(--accent); }
+  .app-heading { margin-top: 24px; }
+  .link-button { border: none; padding: 8px; min-height: 40px; color: var(--accent); font-size: 12px; }
+  details { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 14px; }
+  summary { color: var(--muted); font-size: 13px; min-height: 40px; padding-block: 8px; }
+  details[open] > summary { margin-bottom: 12px; }
+  .typer { display: flex; gap: 8px; margin: 8px 0 18px; }
+  input[type=text], input[type=search] { min-width: 0; width: 100%; min-height: 44px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--surface); line-height: 1.4; }
+  .typer input { font-size: 13px; }
+  .danger { color: var(--error); }
+  .danger.armed { border-color: var(--error); background: var(--surface); }
+  .msg { font-size: 13px; color: var(--error); margin-top: 12px; overflow-wrap: anywhere; }
+  .msg:empty { display: none; }
+  .msg.info { color: var(--muted); }
+  .now { border-bottom: 1px solid var(--line); padding-bottom: 24px; margin-bottom: 26px; }
+  .now h2 { margin: 8px 0 14px; }
+  .times { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
+  .controls .primary { min-width: 84px; }
+  .subtitles { margin-top: 14px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .subtitles button { min-height: 40px; padding: 8px 14px; }
+  .subtitles button[aria-pressed=true] { background: var(--active); border-color: var(--accent); }
+  .library-tools { display: flex; gap: 10px; margin-top: 18px; }
+  .library-tools input { flex: 1; }
+  .library-tools .select-wrap { width: 186px; max-width: 100%; flex: none; }
+  .library-settings { margin-top: 12px; padding-top: 0; border-top: none; }
+  .lib { list-style: none; margin: 0; padding: 0; }
+  .lib li { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--line); padding: 14px 0; }
+  .lib .info { flex: 1; min-width: 0; }
+  .lib .name { font-weight: 500; font-size: 15px; overflow-wrap: anywhere; }
+  .lib .current .name { color: var(--accent); }
+  .meta { display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .actions { display: flex; gap: 6px; flex: none; }
+  .actions button { min-width: 58px; }
+  .tag { display: inline-block; color: var(--accent); font-size: 11px; margin-left: 8px; }
+  .bar { height: 3px; margin-top: 8px; background: var(--control); border-radius: 3px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--accent); }
+  .empty { color: var(--muted); padding: 30px 0; }
+  .switch { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .folders { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+  .folder { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; max-width: 100%; }
+  .folder span { overflow-wrap: anywhere; }
+  .folder button { font-size: 12px; color: var(--muted); }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+  .stats dt { color: var(--muted); font-size: 12px; }
+  .stats dd { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+  .file { font-size: 12px; overflow-wrap: anywhere; color: var(--muted); }
   .file:empty { display: none; }
-  .foot { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-  .hint { font-size: 12px; color: var(--muted); line-height: 2; }
-  kbd { font: inherit; font-size: 11px; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; }
-  @media (max-width: 520px) {
-    .controls { gap: 6px; }
-    .controls .btn { min-width: 48px; padding: 0 8px; }
-    .stats { grid-template-columns: 1fr; }
-    .lib li { flex-wrap: wrap; }
-    .remote { grid-template-columns: 1fr; justify-items: center; }
+  footer { border-top: 1px solid var(--line); margin-top: 30px; padding-top: 15px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  kbd { font: inherit; color: var(--text); }
+  .warn { color: var(--warning); }
+  @media (max-width: 820px) {
+    main { padding: 20px; }
+    .workspace { grid-template-columns: 280px minmax(0, 1fr); gap: 24px; }
+    .remote-panel { padding: 18px; }
+    .library-tools { flex-direction: column; }
+    .library-tools .select-wrap { width: 100%; }
+    .lib li { flex-wrap: wrap; gap: 10px; }
+    .lib .info { flex-basis: 100%; }
   }
+  @media (max-width: 640px) {
+    main { padding: 18px 16px 28px; }
+    header { flex-wrap: wrap; padding-bottom: 18px; }
+    .picker { flex: 1; justify-content: flex-end; }
+    .picker .select-wrap { flex: 1; max-width: 210px; }
+    .picker select { font-size: 12px; }
+    .picker button { flex: none; padding-inline: 9px; }
+    .statusbar { padding: 20px 0; align-items: flex-start; }
+    .statusbar h2 { font-size: 22px; }
+    .connection { font-size: 12px; }
+    .workspace { display: flex; flex-direction: column; gap: 28px; }
+    .remote-panel { position: static; width: 100%; padding: 20px; }
+    .content { width: 100%; }
+    .dpad { grid-template-rows: repeat(3, 52px); margin-block: 18px; }
+    .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .controls .primary { min-width: 0; }
+    .lib .info { flex-basis: auto; }
+    .lib .actions { flex-wrap: wrap; }
+  }
+  @media (max-width: 380px) {
+    .picker { flex-basis: 100%; }
+    .picker .select-wrap { max-width: none; }
+    .lib .info { flex-basis: 100%; }
+  }
+  @media (max-height: 850px) { .remote-panel { position: static; } }
+  @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
+<!-- Dropdown chevron: https://lucide.dev/icons/chevron-down
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
 </head>
 <body>
 <main>
   <header>
-    <span class="brand">TV Cast</span>
-    <span class="picker">
-      <select class="btn" id="tv" aria-label="TV" hidden></select>
-      <button class="btn" id="find">Find TVs</button>
-    </span>
+    <h1>TV Cast</h1>
+    <div class="picker">
+      <span class="select-wrap"><select id="tv" aria-label="TV" hidden></select></span>
+      <button id="find">Find TVs</button>
+    </div>
   </header>
-
-  <section class="card">
-    <span class="pill" id="state">Connecting…</span>
-    <h1 id="title">—</h1>
-    <input type="range" id="seek" min="0" max="1" step="1" value="0" aria-label="Seek">
-    <div class="times"><span id="pos"></span><span id="left"></span></div>
-    <div class="controls">
-      <button class="btn" data-skip="-30" aria-label="Back 30 seconds">−30s</button>
-      <button class="btn" data-skip="-10" aria-label="Back 10 seconds">−10s</button>
-      <button class="big" id="toggle" aria-label="Play"></button>
-      <button class="btn" data-skip="10" aria-label="Forward 10 seconds">+10s</button>
-      <button class="btn" data-skip="30" aria-label="Forward 30 seconds">+30s</button>
-    </div>
-    <div class="vol">
-      <button class="icon" id="mute" aria-label="Mute"></button>
-      <input type="range" id="volume" min="0" max="100" step="1" value="0" aria-label="TV volume">
-      <span class="num" id="volnum">–</span>
-    </div>
-    <div class="subs">
-      <div class="left" id="subctl" hidden>
-        <span class="label" id="sublabel">Subtitles</span>
-        <div class="seg" role="group" aria-labelledby="sublabel">
-          <button id="subOn" aria-pressed="false">On</button>
-          <button id="subOff" aria-pressed="false">Off</button>
+  <div class="statusbar">
+    <div><p class="caption">On your TV</p><h2 id="screen">Connecting…</h2><p class="note" id="screenNote"></p></div>
+    <span class="connection" id="connection">Checking TV</span>
+  </div>
+  <p class="msg" id="globalmsg" role="status"></p>
+  <div class="workspace">
+    <aside class="remote-panel" id="remote" aria-label="TV remote">
+      <div class="row"><h2>Remote</h2><span class="badge" id="rstate"></span></div>
+      <div class="volume">
+        <div class="row"><label class="caption" for="volume">Volume</label><span class="sound-state" id="sound">Checking sound</span></div>
+        <div class="volume-controls">
+          <button id="mute" aria-pressed="false" disabled>Mute</button>
+          <input type="range" id="volume" min="0" max="100" value="0" aria-label="TV volume" disabled>
+          <output id="volnum" for="volume">—</output>
         </div>
       </div>
-      <button class="btn" id="stop">Stop</button>
-    </div>
-    <p class="msg" id="msg" role="status"></p>
-  </section>
+      <div id="pairing" hidden><p class="note" id="pairNote"></p><button id="pair" class="primary" hidden>Pair with TV</button></div>
+      <div id="remoteControls" hidden>
+        <div class="dpad" role="group" aria-label="Navigation">
+          <button class="up" data-key="KEY_UP" aria-label="Up">Up</button>
+          <button class="left" data-key="KEY_LEFT" aria-label="Left">Left</button>
+          <button class="ok" data-key="KEY_ENTER" aria-label="OK">OK</button>
+          <button class="right" data-key="KEY_RIGHT" aria-label="Right">Right</button>
+          <button class="down" data-key="KEY_DOWN" aria-label="Down">Down</button>
+        </div>
+        <div class="keys"><button data-key="KEY_RETURN">Back</button><button data-key="KEY_HOME">Home</button><button data-key="KEY_SOURCE">Source</button></div>
+        <div class="keys"><button data-key="KEY_PLAY">Play</button><button data-key="KEY_PAUSE">Pause</button><button data-key="KEY_MENU">Settings</button></div>
+        <div class="row app-heading"><h2>Apps</h2><button class="link-button" id="refreshApps">Refresh</button></div>
+        <div class="apps" id="apps"></div>
+        <p class="msg" id="appmsg" role="status"></p>
+        <details id="moreRemote">
+          <summary>Typing, inputs &amp; power</summary>
+          <label class="caption" for="typed">Type on the TV</label>
+          <p class="note">Open a search box on the TV first.</p>
+          <form class="typer" id="typer"><input type="text" id="typed" placeholder="Search or enter text" autocomplete="off"><button id="sendText">Send</button></form>
+          <div class="keys"><button data-key="KEY_HDMI1">HDMI 1</button><button data-key="KEY_HDMI2">HDMI 2</button><button data-key="KEY_HDMI3">HDMI 3</button></div>
+          <p class="note">Use Source to see the TV's available inputs.</p>
+          <div class="folders"><button class="danger" id="tvoff">Turn TV off</button></div>
+          <p class="note">Use the TV's own remote to turn it back on.</p>
+        </details>
+      </div>
+      <p class="msg" id="remotemsg" role="status"></p>
+      <details id="diagnostics"><summary>Connection &amp; stream details</summary>
+        <dl class="stats"><div><dt>TV</dt><dd id="device">—</dd></div><div><dt>Stream</dt><dd id="srv">—</dd></div><div><dt>Sending now</dt><dd id="rate">—</dd></div><div><dt>Sent since start</dt><dd id="sent">—</dd></div><div><dt>Last TV request</dt><dd id="last">—</dd></div><div><dt>Open transfers</dt><dd id="active">—</dd></div><div><dt>Running for</dt><dd id="uptime">—</dd></div><div><dt>Mac power</dt><dd id="power">—</dd></div></dl>
+        <p class="file" id="file"></p><p class="note">App status covers the supported apps listed above. The TV does not report the current HDMI input or titles playing inside apps here.</p>
+      </details>
+    </aside>
+    <div class="content">
+      <section class="now" id="now" aria-label="Cast playback" hidden>
+        <span class="caption" id="state"></span><h2 id="title"></h2>
+        <input type="range" id="seek" min="0" max="1" value="0" aria-label="Seek" disabled>
+        <div class="times"><span id="pos"></span><span id="left"></span></div>
+        <div class="controls"><button data-skip="-30">−30s</button><button data-skip="-10">−10s</button><button class="primary" id="toggle" disabled>Play</button><button data-skip="10">+10s</button><button data-skip="30">+30s</button><button id="stop" disabled>Stop</button></div>
+        <div class="subtitles" id="subctl" role="group" aria-label="Subtitles" hidden><span>Subtitles</span><button id="subOn" aria-pressed="false">On</button><button id="subOff" aria-pressed="false">Off</button></div>
+        <p class="note" id="upnext"></p>
+      </section>
+      <p class="msg" id="msg" role="status"></p>
+      <section aria-labelledby="libraryTitle">
+        <div class="row"><h2 id="libraryTitle">Your library<span class="count" id="libraryCount"></span></h2><button class="link-button" id="rescan">Rescan</button></div>
+        <div class="library-tools"><input type="search" id="search" aria-label="Search library" placeholder="Search your movies"><span class="select-wrap"><select id="filter" aria-label="Filter library"><option value="all">All movies</option><option value="continue">Continue watching</option><option value="unwatched">Unwatched</option></select></span></div>
+        <p class="note" id="libraryNote"></p>
+        <details id="librarySettings" class="library-settings"><summary>Library folders &amp; auto-play</summary><label class="switch"><input type="checkbox" id="autoplay">Auto-play next in collection</label><div id="folders"></div><button id="addFolder">Add folder</button></details>
+        <p class="msg" id="libmsg" role="status"></p>
+        <div id="libbody"></div>
+      </section>
 
-  <section class="card">
-    <div class="row"><h2>Remote</h2><span class="pill" id="rstate">…</span></div>
-    <div id="remotebody"></div>
-    <p class="msg" id="remotemsg" role="status"></p>
-  </section>
-
-  <section class="card">
-    <div class="row">
-      <h2>Library</h2>
-      <label class="switch"><input type="checkbox" id="autoplay"> Auto-play next in collection</label>
     </div>
-    <div id="libbody"></div>
-    <p class="msg" id="libmsg" role="status"></p>
-  </section>
-
-  <section class="card">
-    <div class="row"><h2>Stream server</h2><span class="pill" id="srv">…</span></div>
-    <dl class="stats">
-      <div><dt>Sending now</dt><dd id="rate">–</dd></div>
-      <div><dt>Sent since start</dt><dd id="sent">–</dd></div>
-      <div><dt>Last TV request</dt><dd id="last">–</dd></div>
-      <div><dt>Open transfers</dt><dd id="active">–</dd></div>
-      <div><dt>Running for</dt><dd id="uptime">–</dd></div>
-      <div><dt>Mac power</dt><dd id="power">–</dd></div>
-    </dl>
-    <p class="file" id="file"></p>
-    <div class="foot">
-      <span class="hint"><kbd>Space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> 10s · <kbd>↑</kbd><kbd>↓</kbd> volume · <kbd>M</kbd> mute · <kbd>C</kbd> subtitles · log: ~/Library/Logs/tvcast.log</span>
-    </div>
-  </section>
+  </div>
+  <footer><span id="powerBrief"></span><span><kbd>M</kbd> mute &nbsp; <kbd>Space</kbd> cast play/pause &nbsp; Arrow keys navigate the remote when focused</span></footer>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const svg = body => `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${body}</svg>`;
-const ICON = {
-  play: svg('<path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/>'),
-  pause: svg('<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>'),
-  speaker: svg('<path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>'),
-  muted: svg('<path d="M4 9.5v5h3.5l4.5 4v-13l-4.5 4z"/><path d="M16 9.5l5 5m0-5l-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>'),
-};
-const STATES = {
-  PLAYING: ["Playing", "live"], PAUSED_PLAYBACK: ["Paused", ""], STOPPED: ["Stopped", ""],
-  TRANSITIONING: ["Loading…", "live"], NO_MEDIA_PRESENT: ["Idle", ""],
-};
-const RESUME_MIN = 30;  // matches the daemon: earlier resume points start from the top
-
-let st = null, seeking = false, volDragging = false;
-let opening = null, choosingFolder = false, pairing = false, finding = false, powerArmed = false, powerTimer = null;
-let apps = null, appsLoading = false, appsRetryAt = 0;  // retry because the TV may be off at first
-let remoteTv = null;  // the TV that apps and the power confirmation belong to
-let libSig = "", remoteSig = "", tvSig = "";
-const errors = {};  // panel area -> {text, at}
-
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
 const clock = s => {
-  if (s == null) return "–:––:––";
+  if (s == null) return '—';
   s = Math.max(0, Math.floor(s));
-  return `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  return `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 };
-const runtime = s => s ? `${Math.floor(s / 3600)}h ${String(Math.round(s % 3600 / 60)).padStart(2, "0")}m` : "";
-const size = n => n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : (n / 1e6).toFixed(1) + " MB";
-const ago = s => s == null ? "never" : s < 2 ? "just now" : s < 120 ? `${Math.round(s)}s ago` : `${Math.round(s / 60)} min ago`;
-const pill = (el, text, cls = "") => { el.textContent = text; el.className = "pill " + cls; };
-const paint = el => el.style.setProperty("--p", (el.max > el.min ? (el.value - el.min) / (el.max - el.min) * 100 : 0) + "%");
-const recentError = area => { const e = errors[area]; return e && Date.now() - e.at < 8000 ? e.text : ""; };
-const show = (id, text, info = false) => { $(id).textContent = text || ""; $(id).className = "msg" + (info ? " info" : ""); };
+const runtime = s => { const m = Math.round(s / 60); return s ? `${Math.floor(m / 60)}h ${m % 60}m` : ''; };
+const size = n => n >= 1e9 ? (n / 1e9).toFixed(2) + ' GB' : (n / 1e6).toFixed(1) + ' MB';
+const ago = s => s == null ? 'No requests yet' : s < 2 ? 'Just now' : s < 120 ? `${Math.round(s)}s ago` : `${Math.round(s / 60)} min ago`;
+const STATES = {PLAYING:'Playing from your Mac', PAUSED_PLAYBACK:'Paused', STOPPED:'Stopped', TRANSITIONING:'Loading…', NO_MEDIA_PRESENT:'No media loaded'};
+const RESUME_MIN = 30;
+let st = null, online = false, selecting = false, finding = false, pairing = false;
+let opening = null, choosingFolder = false, seeking = false, volDragging = false;
+let apps = null, appsLoading = false, appsAt = 0, appsNext = 0, appsGeneration = 0, appsSig = '';
+let remoteTv = null, launching = null, powerArmed = false, powerTimer;
+let tvSig = '', libSig = '', folderSig = '', refreshId = 0;
+const errors = {};
+const show = (id, text, info = false) => { $(id).textContent = text || ''; $(id).className = 'msg' + (info ? ' info' : ''); };
+const canControl = () => online && !selecting && !!st?.selected;
+const ownsPlayback = () => canControl() && st.now && st.tv?.uri?.includes('/media/' + st.now.id);
+const appsFresh = () => canControl() && !!st.tv && !!appsAt && Date.now() - appsAt < 30000;
 
-async function api(action, body = {}) {
-  const r = await fetch("/api/" + action, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-TVCast": "1" },
-    body: JSON.stringify(body),
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status });
-  return data;
-}
-
-// Run a control action; a failure is shown in the given panel area for a few seconds.
-async function act(action, body, area = "msg") {
-  let result = null;
+async function request(url, options = {}, timeout = 120000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    result = await api(action, body);
-    delete errors[area];
+    const r = await fetch(url, {...options, signal:controller.signal, cache:'no-store'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `Request failed (HTTP ${r.status}). Try again.`);
+    return data;
   } catch (e) {
-    errors[area] = { text: e.message, at: Date.now() };
-  }
+    if (e.name === 'AbortError') throw new Error('The request timed out. Check the TV and try again.');
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+const api = (action, body = {}) => request('/api/' + action, {method:'POST', headers:{'Content-Type':'application/json', 'X-TVCast':'1'}, body:JSON.stringify(body)});
+async function act(action, body = {}, area = 'msg') {
+  const tv = st?.selected;
+  let result = null;
+  try { result = await api(action, body); if (tv === st?.selected) delete errors[area]; }
+  catch (e) { if (tv === st?.selected) errors[area] = e.message; }
   await refresh();
   return result;
 }
 
+function renderTvs() {
+  const sig = JSON.stringify([st.tvs, st.selected, finding, selecting]);
+  if (sig === tvSig) return;
+  tvSig = sig;
+  $('tv').hidden = !st.tvs.length;
+  $('tv').disabled = finding || selecting;
+  $('tv').innerHTML = (st.selected ? '' : '<option value="" disabled selected>Choose a TV</option>') + st.tvs.map(t => `<option value="${esc(t.id)}" ${t.id === st.selected ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
+  $('find').disabled = finding || selecting;
+  $('find').textContent = finding ? 'Searching…' : 'Find TVs';
+}
+function renderStatus() {
+  const tv = online ? st.tv : null;
+  const visible = appsFresh() && apps?.find(a => a.visible === true);
+  const ours = ownsPlayback();
+  $('connection').textContent = !online ? 'Service offline' : !st.selected ? 'No TV selected' : tv ? 'TV connected' : 'TV unreachable';
+  $('connection').className = 'connection ' + (online && tv ? 'live' : '');
+  const launchingName = launching && apps?.find(a => a.id === launching)?.name;
+  $('screen').textContent = launchingName ? `Opening ${launchingName}…` : ours ? 'Casting from your Mac' : visible ? visible.name : !online ? 'Connection lost' : !st.selected ? 'Choose your TV' : !tv ? 'TV off or unreachable' : 'Ready when you are';
+  $('screenNote').textContent = ours ? (STATES[tv.state] || 'Cast playback') : visible ? 'App open on TV' : tv ? 'Use the remote or play a movie from your Mac.' : 'Turn the TV on and connect to the same network.';
+  $('volume').disabled = !canControl() || tv?.volume == null;
+  $('mute').disabled = !canControl() || tv?.muted == null;
+  if (!volDragging) { $('volume').value = tv?.volume ?? 0; $('volnum').textContent = tv?.volume ?? '—'; }
+  const muted = tv?.muted;
+  $('sound').textContent = muted === true ? 'Muted' : muted === false ? 'Sound on' : 'Sound unknown';
+  $('sound').className = 'sound-state' + (muted === true ? ' muted' : '');
+  $('mute').textContent = muted === true ? 'Unmute' : 'Mute';
+  $('mute').setAttribute('aria-pressed', String(muted === true));
+  $('mute').setAttribute('aria-label', muted === true ? 'Unmute TV' : 'Mute TV');
+  $('now').hidden = !st.now && !opening;
+  $('title').textContent = opening ? 'Opening ' + (st.library.find(m => m.id === opening)?.title || 'movie') + '…' : st.now?.title || '';
+  $('state').textContent = tv ? STATES[tv.state] || 'Cast playback' : 'Waiting for TV';
+  for (const el of [$('seek'), $('toggle'), $('stop'), ...document.querySelectorAll('[data-skip]')]) el.disabled = !ours || !!opening;
+  $('seek').disabled ||= !tv?.duration;
+  if (!seeking) {
+    $('seek').max = Math.floor(tv?.duration || 1);
+    $('seek').value = Math.floor(tv?.position || 0);
+    showTimes(ours ? tv.position : null, ours ? tv.duration : null);
+  }
+  $('toggle').textContent = ours && tv.state === 'PLAYING' ? 'Pause' : 'Play';
+  const subs = ours ? tv.subtitles : null;
+  $('subctl').hidden = subs == null;
+  $('subOn').setAttribute('aria-pressed', String(subs === true));
+  $('subOff').setAttribute('aria-pressed', String(subs === false));
+  const next = st.autoplay && st.library.find(m => m.id === st.up_next);
+  $('upnext').textContent = next ? 'Up next: ' + next.title : '';
+  show('msg', errors.msg || (st.now && st.tv_error));
+}
 function showTimes(pos, dur) {
-  $("pos").textContent = `${clock(pos)} / ${clock(dur)}`;
-  $("left").textContent = dur ? `${clock(dur - pos)} left` : "";
+  $('pos').textContent = pos == null ? '' : `${clock(pos)} / ${clock(dur)}`;
+  $('left').textContent = dur ? `${clock(dur - (pos || 0))} left` : '';
+  $('seek').setAttribute('aria-valuetext', `${clock(pos)} of ${clock(dur)}`);
 }
-
-function renderNowPlaying() {
-  const tv = st.tv, now = st.now;
-  const ours = !!(now && tv && tv.uri && tv.uri.includes("/media/" + now.id));
-  $("title").textContent = now ? now.title : "Nothing playing";
-  $("title").className = now ? "" : "idle";
-  if (!st.selected) pill($("state"), "No TV selected");
-  else if (!tv) pill($("state"), now ? "TV unreachable" : "TV off or unreachable", now ? "bad" : "");
-  else if (!now) pill($("state"), "Pick something from the library");
-  else { const [label, cls] = STATES[tv.state] || [tv.state || "Unknown", ""]; pill($("state"), label, cls); }
-
-  for (const el of [$("seek"), $("toggle"), $("stop"), ...document.querySelectorAll("[data-skip]")]) el.disabled = !ours;
-  if (ours && !seeking && tv.duration) {
-    $("seek").max = Math.floor(tv.duration);
-    $("seek").value = Math.floor(tv.position || 0);
-    showTimes(tv.position || 0, tv.duration);
-  } else if (!ours) {
-    $("seek").value = 0;
-    $("pos").textContent = $("left").textContent = "";
-  }
-  paint($("seek"));
-  const playing = ours && tv.state === "PLAYING";
-  $("toggle").innerHTML = playing ? ICON.pause : ICON.play;
-  $("toggle").setAttribute("aria-label", playing ? "Pause" : "Play");
-
-  $("volume").disabled = $("mute").disabled = !tv || tv.volume == null;
-  if (tv && !volDragging && tv.volume != null) {
-    $("volume").value = tv.volume;
-    $("volnum").textContent = tv.volume;
-  }
-  paint($("volume"));
-  const muted = !!(tv && tv.muted);
-  $("mute").innerHTML = muted ? ICON.muted : ICON.speaker;
-  $("mute").classList.toggle("on", muted);
-  $("mute").setAttribute("aria-label", muted ? "Unmute" : "Mute");
-
-  // Null when nothing with subtitles plays, or always on a TV without Samsung's caption extension.
-  const subs = tv ? tv.subtitles : null;
-  $("subctl").hidden = subs == null;
-  $("subOn").setAttribute("aria-pressed", String(subs === true));
-  $("subOff").setAttribute("aria-pressed", String(subs === false));
-
-  const err = recentError("msg") || (now && st.tv_error);
-  const openingTitle = opening && (st.library.find(m => m.id === opening) || {}).title;
-  if (err) show("msg", err);
-  else if (!st.selected) show("msg", st.tvs.length ? "Choose a TV at the top of the page."
-    : "Turn the TV on, then choose Find TVs. It must be on the same network as this Mac.", true);
-  else show("msg", openingTitle ? `Starting ${openingTitle} on the TV…` : "", true);
-}
-
 function movieRow(m) {
-  const current = !!(st.now && st.now.id === m.id);
+  const current = st.now?.id === m.id;
   const partial = m.position >= RESUME_MIN;
-  const meta = [m.year, runtime(m.duration), m.subs ? "Subtitles" : ""];
-  if (m.problem) meta.push(`<span class="warn">⚠ ${esc(m.problem)}</span>`);
-  else if (m.checking) meta.push("checking format…");
-  if (!current && partial) meta.push(`Resume at ${clock(m.position)}`);
-  else if (!current && m.watched) meta.push("Watched ✓");
-  const tag = current ? `<span class="tag">Now playing</span>`
-    : m.id === st.up_next && st.autoplay ? `<span class="tag">Up next</span>` : "";
-  const bar = !current && partial && m.duration
-    ? `<div class="bar"><span style="width:${Math.min(100, m.position / m.duration * 100).toFixed(1)}%"></span></div>` : "";
-  let actions = "";
+  const meta = [m.year, runtime(m.duration), m.subs ? 'Subtitles' : '', !current && partial ? `Resume at ${clock(m.position)}` : m.watched ? 'Watched' : ''];
+  const tag = current ? 'Casting' : m.id === st.up_next && st.autoplay ? 'Up next' : '';
+  let actions = '';
   if (!current) {
-    const dis = opening ? "disabled" : "";
-    const label = opening === m.id ? "Starting…" : m.problem ? "Try anyway" : partial ? "Resume" : "Play";
-    actions = `<button class="btn ${m.problem ? "" : "primary"}" data-open="${m.id}" ${dis}>${label}</button>`;
-    if (partial || m.watched) actions += `<button class="btn" data-open="${m.id}" data-from-start="1" ${dis}>Start over</button>`;
+    const disabled = !canControl() || !st.tv || opening ? 'disabled' : '';
+    const label = opening === m.id ? 'Opening…' : m.problem ? 'Try anyway' : partial ? 'Resume' : 'Play';
+    actions = `<button ${partial ? 'class="primary"' : ''} data-open="${m.id}" aria-label="${esc(label + ' ' + m.title)}" ${disabled}>${label}</button>`;
+    if (partial || m.watched) actions += `<button data-open="${m.id}" data-from-start="1" aria-label="${esc('Start ' + m.title + ' over')}" ${disabled}>Start over</button>`;
   }
-  const cls = [current ? "current" : "", m.problem ? "problem" : ""].join(" ");
-  return `<li class="${cls}"><div class="info"><div class="name">${esc(m.title)}${tag}</div>`
-    + `<div class="meta">${meta.filter(Boolean).join(" · ")}</div>${bar}</div><div class="actions">${actions}</div></li>`;
+  const bar = !current && partial && m.duration ? `<div class="bar"><span style="width:${Math.min(100, m.position / m.duration * 100)}%"></span></div>` : '';
+  return `<li class="${current ? 'current' : ''}"><div class="info"><div class="name">${esc(m.title)}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="meta">${meta.filter(Boolean).map(t => `<span>${esc(t)}</span>`).join('')}${m.problem ? `<span class="warn">${esc(m.problem)}</span>` : m.checking ? '<span>Checking format…</span>' : ''}</div>${bar}</div><div class="actions">${actions}</div></li>`;
 }
-
 function renderLibrary() {
-  const sig = JSON.stringify([st.libraries, st.groups, st.library, st.now && st.now.id, st.up_next,
-    st.autoplay, st.scanning, st.checking, opening, choosingFolder]);
-  if (sig === libSig) return;
-  libSig = sig;
-  $("autoplay").checked = !!st.autoplay;
-
-  let out = `<div class="folders">`
-    + st.libraries.map(l => `<span class="chip" title="${esc(l.path)}"><span>${esc(l.name)}</span>`
-      + `<button data-remove="${esc(l.path)}" aria-label="Remove ${esc(l.name)} from the library">×</button></span>`).join("")
-    + `<button class="btn" id="addFolder" ${choosingFolder ? "disabled" : ""}>${choosingFolder ? "Choose in the dialog on your Mac…" : "+ Add folder"}</button></div>`;
-  for (const l of st.libraries) for (const p of l.problems) out += `<p class="msg">${esc(l.name)}: ${esc(p)}</p>`;
-  const notes = [];
-  for (const l of st.libraries) {
-    if (l.private.length) notes.push(`Skipped in ${esc(l.name)}, kept private by macOS: ${l.private.map(esc).join(", ")}.`);
+  if (!st) return;
+  const query = $('search').value.trim().toLocaleLowerCase(), filter = $('filter').value;
+  const sig = JSON.stringify([st.library, st.groups, st.libraries, st.scanning, st.now, st.up_next, st.autoplay, opening, canControl(), !!st.tv, query, filter]);
+  if (sig !== libSig) {
+    libSig = sig;
+    const movies = st.library.filter(m => `${m.title} ${m.year || ''}`.toLocaleLowerCase().includes(query) && (filter === 'all' || (filter === 'continue' ? m.position >= RESUME_MIN && !m.watched : !m.watched)));
+    $('libraryCount').textContent = movies.length === st.library.length ? ` ${movies.length} ${movies.length === 1 ? 'movie' : 'movies'}` : ` ${movies.length} of ${st.library.length}`;
+    let out = '';
+    for (const g of st.groups) {
+      const group = movies.filter(m => m.group === g.id);
+      if (group.length) out += `<h3>${esc(g.name)}<span class="count"> ${group.length}</span></h3><ul class="lib">${group.map(movieRow).join('')}</ul>`;
+    }
+    $('libbody').innerHTML = out || `<p class="empty">${st.scanning ? 'Finding your movies…' : query || filter !== 'all' ? 'No matching movies. Try another search or filter.' : st.libraries.length ? 'No videos found. Add another folder below.' : 'Add a folder below to find your movies.'}</p>`;
   }
-  if (st.scanning) notes.push("Scanning folders…");
-  if (st.checking) notes.push(`Checking video formats (${st.checking} left)…`);
-  if (notes.length) out += `<p class="note">${notes.join(" ")}</p>`;
-
-  if (!st.libraries.length) out += `<p class="empty">Add a folder to find the videos in it.</p>`;
-  else if (!st.library.length && !st.scanning) out += `<p class="empty">No videos found in these folders.</p>`;
-  for (const g of st.groups) {
-    const movies = st.library.filter(m => m.group === g.id);
-    out += `<h3>${esc(g.name)}<span class="count">${movies.length}</span></h3><ul class="lib">${movies.map(movieRow).join("")}</ul>`;
+  $('autoplay').checked = !!st.autoplay;
+  $('rescan').disabled = !online || st.scanning;
+  $('rescan').textContent = st.scanning ? 'Scanning…' : 'Rescan';
+  const problems = st.libraries.reduce((n, l) => n + l.problems.length, 0);
+  $('libraryNote').textContent = problems ? 'Some folders could not be read. Open Library folders for details.' : st.checking ? `Checking video formats (${st.checking} left)…` : '';
+  const folders = JSON.stringify(st.libraries);
+  if (folders !== folderSig) {
+    folderSig = folders;
+    $('folders').innerHTML = st.libraries.map(l => `<div class="folders"><span class="folder"><span title="${esc(l.path)}">${esc(l.name)}</span><button data-remove="${esc(l.path)}" aria-label="Remove ${esc(l.name)} from library">Remove</button></span></div>${l.problems.map(p => `<p class="msg">${esc(p)}</p>`).join('')}${l.private.length ? `<p class="note">Kept private by macOS: ${l.private.map(esc).join(', ')}.</p>` : ''}`).join('');
   }
-  $("libbody").innerHTML = out;
-  show("libmsg", recentError("libmsg"));
+  $('addFolder').disabled = choosingFolder || !online;
+  $('autoplay').disabled = !online;
+  document.querySelectorAll('[data-remove]').forEach(b => b.disabled = !online);
+  $('addFolder').textContent = choosingFolder ? 'Choose a folder on your Mac…' : 'Add folder';
+  show('libmsg', errors.libmsg);
 }
-
 function renderRemote() {
   if (st.selected !== remoteTv) {
     remoteTv = st.selected;
-    apps = null;
-    appsRetryAt = 0;
-    delete errors.remotemsg;
-    clearTimeout(powerTimer);
-    powerArmed = false;
+    appsGeneration++;
+    apps = null; appsAt = 0; appsNext = 0; appsLoading = false; launching = null;
+    delete errors.remotemsg; delete errors.appmsg;
+    clearTimeout(powerTimer); powerArmed = false;
+    $('typed').value = '';
   }
   const available = st.remote.available, paired = available && st.remote.paired;
-  pill($("rstate"), !available ? "Not available" : paired ? "Paired" : pairing ? "Waiting for the TV…" : "Not paired", paired ? "live" : "");
-  const sig = JSON.stringify([remoteTv, available, paired, pairing, apps, appsLoading, appsRetryAt, powerArmed]);
-  if (sig !== remoteSig) {
-    remoteSig = sig;
-    if (!available) {
-      $("remotebody").innerHTML = `<p class="note">${remoteTv
-        ? "Remote keys and apps need a Samsung Smart TV (Tizen, 2016 or newer). Playback controls work with any TV."
-        : "Choose a TV to use this page as its remote."}</p>`;
-    } else if (!paired) {
-      $("remotebody").innerHTML = `<p class="note">Pair once to use this page as the TV's remote: arrows, inputs, apps, typing and power.`
-        + ` The TV will ask whether to allow “TV Cast”; choose Allow with the TV remote.</p>`
-        + `<div class="folders"><button class="btn primary" id="pair" ${pairing ? "disabled" : ""}>${pairing ? "Accept the prompt on the TV…" : "Pair with TV"}</button></div>`;
-    } else {
-      const k = (key, label, extra = "") => `<button class="btn" data-key="${key}" ${extra}>${label}</button>`;
-      const appChips = apps === null
-        ? `<span class="note">${appsLoading ? "Checking which apps are installed…" : "Couldn't reach the TV; trying again shortly."}</span>`
-        : apps.length ? apps.map(a => `<button class="btn" data-app="${esc(a.id)}">${esc(a.name)}</button>`).join("")
-        : `<span class="note">None of the apps TV Cast knows about are installed.</span>`;
-      $("remotebody").innerHTML = `<div class="remote">`
-        + `<div class="dpad">`
-        + `<button class="up" data-key="KEY_UP" aria-label="Up">▲</button>`
-        + `<button class="left" data-key="KEY_LEFT" aria-label="Left">◀</button>`
-        + `<button class="ok" data-key="KEY_ENTER">OK</button>`
-        + `<button class="right" data-key="KEY_RIGHT" aria-label="Right">▶</button>`
-        + `<button class="down" data-key="KEY_DOWN" aria-label="Down">▼</button></div>`
-        + `<div><div class="keys">${k("KEY_RETURN", "Back")}${k("KEY_HOME", "Home")}${k("KEY_MENU", "Settings")}</div>`
-        + `<div class="keys">${k("KEY_VOLDOWN", "Vol −")}${k("KEY_MUTE", "Mute")}${k("KEY_VOLUP", "Vol +")}</div>`
-        + `<div class="keys">${k("KEY_SOURCE", "Source")}${k("KEY_HDMI1", "HDMI 1")}${k("KEY_HDMI2", "HDMI 2")}${k("KEY_HDMI3", "HDMI 3")}</div></div>`
-        + `</div>`
-        + `<p class="group-label">Apps</p><div class="apps">${appChips}</div>`
-        + `<p class="group-label">Type into the TV's on-screen keyboard</p>`
-        + `<form class="typer" id="typer"><input id="typed" placeholder="Open a search box on the TV first" autocomplete="off"><button class="btn">Send</button></form>`
-        + `<div class="folders"><button class="btn danger ${powerArmed ? "armed" : ""}" id="tvoff">${powerArmed ? "Click again to turn the TV off" : "Turn TV off"}</button>`
-        + `<span class="note">Turning it back on needs the TV's own remote.</span></div>`;
-    }
+  const enabled = canControl() && paired && !!st.tv;
+  $('rstate').textContent = !available ? 'Not available' : pairing ? 'Pairing…' : paired ? 'Paired' : 'Not paired';
+  $('pairing').hidden = paired;
+  $('pairNote').textContent = !available ? 'Navigation and apps need a Samsung Smart TV. Casting and volume work with other DLNA TVs.' : 'Pair once, then choose Allow on the TV to use its remote.';
+  $('pair').hidden = !available;
+  $('pair').disabled = pairing || !canControl();
+  $('pair').textContent = pairing ? 'Accept the prompt on TV…' : 'Pair with TV';
+  $('remoteControls').hidden = !paired;
+  document.querySelectorAll('[data-key]').forEach(b => b.disabled = !enabled || !!launching);
+  $('sendText').disabled = !enabled;
+  $('tvoff').disabled = !enabled;
+  $('tvoff').textContent = powerArmed ? 'Confirm turn off' : 'Turn TV off';
+  $('tvoff').classList.toggle('armed', powerArmed);
+  const fresh = appsFresh();
+  const sig = JSON.stringify([apps, fresh, enabled, launching]);
+  if (sig !== appsSig) {
+    appsSig = sig;
+    $('apps').innerHTML = apps?.length ? apps.map(a => `<button data-app="${esc(a.id)}" aria-current="${!!(fresh && a.visible)}" ${!enabled || launching ? 'disabled' : ''} title="${esc(a.version ? 'Version ' + a.version : a.name)}">${esc(a.name)}<small>${launching === a.id ? 'Opening…' : !fresh ? 'Status unavailable' : a.visible === true ? 'Open on TV' : a.visible === null ? 'Status unavailable' : 'Open app'}</small></button>`).join('') : `<p class="note">${apps ? 'No supported apps found.' : !enabled ? 'Apps will appear when the TV reconnects.' : 'Checking apps…'}</p>`;
   }
-  show("remotemsg", recentError("remotemsg"));
-  if (paired && apps === null && !appsLoading && Date.now() >= appsRetryAt) loadApps();
+  $('refreshApps').disabled = !enabled || appsLoading || !!launching;
+  $('refreshApps').textContent = appsLoading ? 'Checking…' : 'Refresh';
+  show('remotemsg', errors.remotemsg);
+  show('appmsg', errors.appmsg || (launching ? 'Opening the app on your TV…' : ''), !errors.appmsg);
+  if (enabled && !appsLoading && !launching && Date.now() >= appsNext) loadApps();
 }
-
 async function loadApps() {
-  const tv = remoteTv;
+  const generation = appsGeneration;
   appsLoading = true;
+  $('refreshApps').disabled = true;
+  $('refreshApps').textContent = 'Checking…';
   try {
-    const list = (await api("apps")).apps;
-    if (tv === remoteTv) apps = list;
+    const result = await api('apps');
+    if (generation !== appsGeneration) return;
+    apps = result.apps; appsAt = Date.now(); appsNext = Date.now() + 15000;
+    delete errors.appmsg;
   } catch (e) {
-    // A late answer about a TV that is no longer selected must not land on the new one.
-    if (tv === remoteTv) {
-      errors.remotemsg = { text: e.message, at: Date.now() };
-      appsRetryAt = Date.now() + 30000;
-    }
+    if (generation !== appsGeneration) return;
+    appsAt = 0; appsNext = Date.now() + 30000;
+    errors.appmsg = e.message;
+  } finally {
+    if (generation === appsGeneration) { appsLoading = false; renderRemote(); renderStatus(); }
   }
-  appsLoading = false;
-  remoteSig = "";
 }
-
-const tvLabel = t => t.model ? `${t.name} · ${t.model}` : t.name;
-
-function renderTvs() {
-  const sig = JSON.stringify([st.tvs, st.selected, finding]);
-  if (sig === tvSig) return;
-  tvSig = sig;
-  const current = st.tvs.find(t => t.id === st.selected);
-  $("tv").hidden = !st.tvs.length;
-  $("tv").disabled = finding;
-  $("tv").title = current ? tvLabel(current) : "";
-  $("tv").innerHTML = (current ? "" : `<option value="" disabled selected>Choose a TV…</option>`)
-    + st.tvs.map(t => `<option value="${esc(t.id)}" ${t === current ? "selected" : ""}>${esc(tvLabel(t))}</option>`).join("");
-  $("find").disabled = finding;
-  $("find").textContent = finding ? "Searching…" : "Find TVs";
-  $("find").classList.toggle("primary", !current);
-}
-
 function renderServer() {
-  const s = st.server;
-  // The TV keeps a transfer open while paused, so an open transfer alone isn't "streaming".
-  if (s.rate > 0) pill($("srv"), "Streaming", "live");
-  else pill($("srv"), s.active > 0 ? "Connected" : "Idle");
-  $("rate").textContent = (s.rate / 1e6).toFixed(2) + " MB/s";
-  $("sent").textContent = size(s.sent);
-  $("last").textContent = ago(s.last_request_age);
-  $("active").textContent = s.active;
-  $("uptime").textContent = clock(s.uptime);
-  $("file").textContent = st.now ? st.now.file : "";
-
-  const p = st.power;
-  if (p.error) {
-    $("power").textContent = p.error;
-  } else {
-    const parts = [p.on_battery ? "On battery" : "Plugged in", p.percent + "%"];
-    if (p.on_battery && p.remaining) parts.push(p.remaining + " left");
-    $("power").textContent = parts.join(" · ");
-  }
-  $("power").classList.toggle("warn", !!p.on_battery && p.percent < 30);
+  const s = st.server, p = st.power, tv = st.tvs.find(t => t.id === st.selected);
+  $('srv').textContent = s.rate > 0 ? 'Streaming' : s.active > 0 ? 'Connected' : 'Idle';
+  $('rate').textContent = (s.rate / 1e6).toFixed(2) + ' MB/s';
+  $('sent').textContent = size(s.sent); $('last').textContent = ago(s.last_request_age);
+  $('active').textContent = s.active; $('uptime').textContent = clock(s.uptime);
+  $('file').textContent = st.now?.file || '';
+  $('device').textContent = tv ? `${tv.model || tv.name} / ${tv.ip}` : 'No TV selected';
+  const power = p.error || `${p.on_battery ? 'Mac on battery' : 'Mac plugged in'}${p.percent == null ? '' : ', ' + p.percent + '%'}${p.on_battery && p.remaining ? ', ' + p.remaining + ' left' : ''}`;
+  $('power').textContent = $('powerBrief').textContent = power;
+  $('powerBrief').classList.toggle('warn', !!p.on_battery && p.percent < 30);
 }
-
-function renderGone() {
-  pill($("state"), "No service", "bad");
-  pill($("srv"), "Not running", "bad");
-  show("msg", "Can't reach the TV Cast service. Check ~/Library/Logs/tvcast.log.");
-}
-
 async function refresh() {
+  const id = ++refreshId;
+  let next;
   try {
-    const r = await fetch("/api/status", { cache: "no-store" });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    st = await r.json();
+    next = await request('/api/status', {}, 25000);
   } catch (e) {
-    renderGone();
+    if (id !== refreshId) return;
+    online = false;
+    show('globalmsg', 'Cannot reach TV Cast. Start it with “tv install”, then reload this page.');
+    if (st) { renderRemote(); renderStatus(); renderLibrary(); }
+    else {
+      $('screen').textContent = 'TV Cast is offline'; $('connection').textContent = 'Service offline';
+      $('sound').textContent = 'Sound unknown';
+      for (const id of ['rescan', 'autoplay', 'addFolder']) $(id).disabled = true;
+    }
+    $('srv').textContent = 'Service offline';
     return;
   }
-  renderTvs();
-  renderNowPlaying();
-  renderLibrary();
-  renderRemote();
-  renderServer();
+  if (id !== refreshId) return;
+  st = next; online = true;
+  show('globalmsg', errors.globalmsg);
+  renderTvs(); renderRemote(); renderStatus(); renderLibrary(); renderServer();
 }
-
-async function poll() {
-  await refresh();
-  setTimeout(poll, 1000);
-}
-
-function togglePlay() {
-  if (st && st.tv && st.now) act(st.tv.state === "PLAYING" ? "pause" : "play");
-}
-
-function skip(delta) {
-  const tv = st && st.tv;
-  if (!tv || !st.now || !tv.duration) return;
-  act("seek", { seconds: Math.min(Math.max(0, (tv.position || 0) + delta), tv.duration - 1) });
-}
-
-function nudgeVolume(delta) {
-  const tv = st && st.tv;
-  if (tv && tv.volume != null) act("volume", { level: Math.min(100, Math.max(0, tv.volume + delta)) });
-}
-
-$("tv").onchange = async e => {
-  await act("select", { id: e.target.value });
-  tvSig = "";  // redraw so a refused choice doesn't stay on screen
-  renderTvs();
+async function poll() { await refresh(); setTimeout(poll, document.hidden ? 10000 : 2000); }
+function togglePlay() { if (ownsPlayback()) act(st.tv.state === 'PLAYING' ? 'pause' : 'play'); }
+function skip(delta) { if (ownsPlayback() && st.tv.duration) act('seek', {seconds:Math.min(Math.max(0, (st.tv.position || 0) + delta), st.tv.duration - 1)}); }
+function remoteKey(key) { if (canControl() && st.remote.paired && st.tv && !launching) act('keys', {keys:[key]}, 'remotemsg'); }
+$('tv').onchange = async e => {
+  const id = e.target.value;
+  selecting = true; appsGeneration++; refreshId++;
+  appsLoading = false; launching = null; appsAt = 0; appsNext = 0;
+  renderTvs(); renderRemote(); renderStatus(); renderLibrary();
+  await act('select', {id}, 'globalmsg');
+  selecting = false; tvSig = ''; await refresh();
+  show('globalmsg', errors.globalmsg);
 };
-$("find").onclick = async () => {
-  finding = true;
-  renderTvs();
-  await act("discover");
-  finding = false;
-  renderTvs();
+$('find').onclick = async () => { finding = true; renderTvs(); await act('discover', {}, 'globalmsg'); finding = false; tvSig = ''; renderTvs(); show('globalmsg', errors.globalmsg); };
+$('mute').onclick = () => { if (canControl() && st.tv?.muted != null) act('mute', {on:!st.tv.muted}, 'remotemsg'); };
+$('volume').oninput = e => { volDragging = true; $('volnum').textContent = e.target.value; };
+$('volume').onchange = async e => { await act('volume', {level:+e.target.value}, 'remotemsg'); volDragging = false; renderStatus(); };
+$('seek').oninput = e => { seeking = true; showTimes(+e.target.value, +e.target.max); };
+$('seek').onchange = async e => { await act('seek', {seconds:+e.target.value}); seeking = false; renderStatus(); };
+$('toggle').onclick = togglePlay;
+$('stop').onclick = () => act('stop');
+document.querySelectorAll('[data-skip]').forEach(b => { b.setAttribute('aria-label', `${+b.dataset.skip < 0 ? 'Back' : 'Forward'} ${Math.abs(+b.dataset.skip)} seconds`); b.onclick = () => skip(+b.dataset.skip); });
+// Re-send Enable even when captions report on: Samsung can report them without drawing them.
+$('subOn').onclick = () => act('subtitles', {on:true});
+$('subOff').onclick = () => act('subtitles', {on:false});
+$('search').oninput = $('filter').onchange = renderLibrary;
+$('rescan').onclick = () => act('rescan', {}, 'libmsg');
+$('autoplay').onchange = e => act('autoplay', {on:e.target.checked}, 'libmsg');
+$('addFolder').onclick = async () => { choosingFolder = true; renderLibrary(); await act('add_folder', {}, 'libmsg'); choosingFolder = false; renderLibrary(); };
+$('folders').onclick = e => { const b = e.target.closest('[data-remove]'); if (b) act('remove_folder', {path:b.dataset.remove}, 'libmsg'); };
+$('libbody').onclick = async e => {
+  const b = e.target.closest('[data-open]');
+  if (!b || opening || !canControl()) return;
+  opening = b.dataset.open; renderLibrary(); renderStatus();
+  await act('open', {id:opening, from_start:b.dataset.fromStart === '1'});
+  opening = null; await refresh();
 };
-$("toggle").onclick = togglePlay;
-$("stop").onclick = () => act("stop");
-document.querySelectorAll("[data-skip]").forEach(b => b.onclick = () => skip(+b.dataset.skip));
-$("mute").onclick = () => st && st.tv && act("mute", { on: !st.tv.muted });
-// "On" always re-sends Enable: the TV can report subtitles as on while not drawing them.
-$("subOn").onclick = () => act("subtitles", { on: true });
-$("subOff").onclick = () => act("subtitles", { on: false });
-$("autoplay").onchange = e => act("autoplay", { on: e.target.checked }, "libmsg");
-
-$("seek").oninput = e => { seeking = true; paint(e.target); showTimes(+e.target.value, +e.target.max); };
-$("seek").onchange = async e => { await act("seek", { seconds: +e.target.value }); seeking = false; };
-$("volume").oninput = e => { volDragging = true; paint(e.target); $("volnum").textContent = e.target.value; };
-$("volume").onchange = async e => { await act("volume", { level: +e.target.value }); volDragging = false; };
-
-$("libbody").addEventListener("click", async e => {
-  const open = e.target.closest("[data-open]");
-  const remove = e.target.closest("[data-remove]");
-  if (open && !opening) {
-    opening = open.dataset.open;
-    libSig = "";
-    renderLibrary();
-    renderNowPlaying();
-    await act("open", { id: opening, from_start: open.dataset.fromStart === "1" });
-    opening = null;
-    libSig = "";
-    await refresh();
-  } else if (remove) {
-    await act("remove_folder", { path: remove.dataset.remove }, "libmsg");
-  } else if (e.target.closest("#addFolder") && !choosingFolder) {
-    choosingFolder = true;
-    libSig = "";
-    renderLibrary();
-    await act("add_folder", {}, "libmsg");
-    choosingFolder = false;
-    libSig = "";
-    await refresh();
-  }
+document.querySelectorAll('[data-key]').forEach(b => b.onclick = () => remoteKey(b.dataset.key));
+$('refreshApps').onclick = () => { if (!appsLoading) loadApps(); };
+$('apps').onclick = async e => {
+  const b = e.target.closest('[data-app]');
+  if (!b || launching || !canControl()) return;
+  launching = b.dataset.app;
+  const generation = ++appsGeneration;
+  appsLoading = false; appsAt = 0; delete errors.appmsg;
+  renderRemote(); renderStatus();
+  try {
+    const result = await api('launch', {id:launching});
+    if (generation !== appsGeneration) return;
+    apps = apps.map(a => a.id === result.app.id ? result.app : {...a, visible:false});
+    appsAt = Date.now(); appsNext = Date.now() + 15000;
+  } catch (e) { if (generation === appsGeneration) { errors.appmsg = e.message; appsNext = Date.now() + 15000; } }
+  finally { if (generation === appsGeneration) { launching = null; renderRemote(); renderStatus(); await refresh(); } }
+};
+$('pair').onclick = async () => { pairing = true; renderRemote(); await act('pair', {}, 'remotemsg'); pairing = false; appsNext = 0; await refresh(); };
+$('typer').onsubmit = async e => {
+  e.preventDefault(); const value = $('typed').value;
+  if (!value || !canControl()) return;
+  const tv = st.selected, result = await act('text', {text:value}, 'remotemsg');
+  if (result && tv === st.selected && $('typed').value === value) $('typed').value = '';
+};
+$('tvoff').onclick = () => {
+  if (!powerArmed) { powerArmed = true; powerTimer = setTimeout(() => { powerArmed = false; renderRemote(); }, 4000); renderRemote(); return; }
+  clearTimeout(powerTimer); powerArmed = false; remoteKey('KEY_POWER'); renderRemote();
+};
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.target.closest('input, select, textarea, [contenteditable=true]')) return;
+  const navigation = {ArrowUp:'KEY_UP', ArrowDown:'KEY_DOWN', ArrowLeft:'KEY_LEFT', ArrowRight:'KEY_RIGHT'};
+  if (e.target.closest('#remote') && navigation[e.key]) { e.preventDefault(); remoteKey(navigation[e.key]); }
+  else if (e.key.toLowerCase() === 'm') { e.preventDefault(); $('mute').click(); }
+  else if (e.target.closest('button, summary, a')) return;
+  else if (e.key === ' ') { if (ownsPlayback()) { e.preventDefault(); togglePlay(); } }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { if (ownsPlayback()) { e.preventDefault(); skip(e.key === 'ArrowLeft' ? -10 : 10); } }
+  else if (e.key.toLowerCase() === 'c' && ownsPlayback() && st.tv.subtitles != null) act('subtitles', {on:!st.tv.subtitles});
 });
-
-$("remotebody").addEventListener("click", async e => {
-  const key = e.target.closest("[data-key]");
-  const app = e.target.closest("[data-app]");
-  if (key) {
-    act("keys", { keys: [key.dataset.key] }, "remotemsg");
-  } else if (app) {
-    act("launch", { id: app.dataset.app }, "remotemsg");
-  } else if (e.target.closest("#pair") && !pairing) {
-    pairing = true;
-    remoteSig = "";
-    renderRemote();
-    await act("pair", {}, "remotemsg");
-    pairing = false;
-    apps = null;
-    remoteSig = "";
-    await refresh();
-  } else if (e.target.closest("#tvoff")) {
-    if (!powerArmed) {
-      powerArmed = true;
-      powerTimer = setTimeout(() => { powerArmed = false; remoteSig = ""; renderRemote(); }, 4000);
-      remoteSig = "";
-      renderRemote();
-      return;
-    }
-    clearTimeout(powerTimer);
-    powerArmed = false;
-    remoteSig = "";
-    act("keys", { keys: ["KEY_POWER"] }, "remotemsg");
-  }
-});
-
-$("remotebody").addEventListener("submit", async e => {
-  e.preventDefault();
-  const input = $("typed");
-  if (!input.value) return;
-  const result = await act("text", { text: input.value }, "remotemsg");
-  if (result) input.value = "";
-});
-
-document.addEventListener("keydown", e => {
-  if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-  if (e.key === " " && e.target.tagName !== "BUTTON") { e.preventDefault(); togglePlay(); }
-  else if (e.key === "ArrowLeft") skip(-10);
-  else if (e.key === "ArrowRight") skip(10);
-  else if (e.key === "ArrowUp") { e.preventDefault(); nudgeVolume(2); }
-  else if (e.key === "ArrowDown") { e.preventDefault(); nudgeVolume(-2); }
-  else if (e.key === "m" || e.key === "M") $("mute").click();
-  else if ((e.key === "c" || e.key === "C") && st && st.tv && st.tv.subtitles != null) act("subtitles", { on: !st.tv.subtitles });
-});
-
-$("toggle").innerHTML = ICON.play;
-$("mute").innerHTML = ICON.speaker;
 poll();
 </script>
 </body>

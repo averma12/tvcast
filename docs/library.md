@@ -1,7 +1,8 @@
 # Your library
 
-Videos come from `~/Movies` by default. Add or remove folders in the panel under **Library**.
-New videos show up when you open the panel or run `tv open`.
+Videos come from `~/Movies` by default. Add or remove folders under **Library folders & auto-play**.
+Use **Rescan**, reopen the panel or run `tv open` to find new videos. Search by title or year;
+**Continue watching** shows unfinished movies with saved progress.
 
 ## Folder layout
 
@@ -29,7 +30,7 @@ Movies/
 - A movie resumes a few seconds before where you stopped. Use **Start over** or
   `tv open … --from-start` to begin again.
 - Past 95% counts as watched.
-- **Auto-play** (switch in the panel) starts the next movie of a collection when one ends.
+- **Auto-play** (under **Library folders & auto-play**) starts the next movie of a collection when one ends.
 - The Mac stays awake while a movie plays. Closing the lid still puts it to sleep.
 
 ## Videos the TV can't play

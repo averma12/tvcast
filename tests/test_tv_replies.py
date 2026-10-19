@@ -62,6 +62,14 @@ class FailureTest(unittest.TestCase):
         with mock.patch.object(samsung, "REST_PORT", server.server_address[1]):
             self.assertFalse(samsung.has_remote("127.0.0.1"))
 
+    def test_missing_or_invalid_mute_state_is_not_unmuted(self):
+        tv = {"services": {"RenderingControl": {}}, "name": "Test TV"}
+        for value, expected in [(None, None), ("unknown", None), ("0", False), ("1", True)]:
+            reply = "<CurrentMute>%s</CurrentMute>" % value if value else "<Response/>"
+            with self.subTest(value=value), mock.patch.object(upnp, "transport_status", return_value={}), \
+                    mock.patch.object(upnp, "rendering", side_effect=["<CurrentVolume>20</CurrentVolume>", reply]):
+                self.assertIs(upnp.tv_status(tv, 2)["muted"], expected)
+
     def test_caption_state_with_a_dtd_is_refused(self):
         bomb = '<!DOCTYPE c [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;">]><captions>&b;</captions>'
         with self.assertRaisesRegex(RuntimeError, "caption state from TV Test TV has a DTD"):

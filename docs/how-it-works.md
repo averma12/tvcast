@@ -11,7 +11,8 @@ For developers. Details live in the module docstrings and comments; this page is
                              ├─ 1. SSDP search ─────────────▶ any DLNA TV on the network
                              ├─ 2. UPnP SOAP: play, seek… ──▶ the selected TV
                              ├◀ 3. the TV downloads the video from the stream server (:8765)
-                             └─ 4. WebSocket (:8002) ───────▶ Samsung only: keys, apps, typing
+                             ├─ 4. WebSocket (:8002) ───────▶ Samsung only: keys, typing
+                             └─ 5. REST (:8001) ───────────▶ Samsung only: app status and launch
 ```
 
 One daemon owns all state. The panel and the `tv` command are both thin clients of its HTTP API,
@@ -30,7 +31,7 @@ so they never disagree.
 | `tvcast/samsung.py` | Samsung remote: pairing, keys, typing, apps. |
 | `tvcast/library.py` | Folder scanning, titles, subtitle matching, codec checks. |
 | `tvcast/state.py` | The JSON state file. |
-| `tvcast/panel.html` | The web panel: one file, plain JavaScript, polls `/api/status` every second. |
+| `tvcast/panel.html` | One HTML file, plain JavaScript. Status polls every 2 s (10 s in a background tab); app checks every 15 s. |
 
 ## Playing a movie
 
@@ -63,7 +64,9 @@ doesn't lose the TV or its pairing.
 - **Samsung extras.** The `CaptionInfo.sec` header and `sec:` tags attach subtitles; other TVs
   ignore them. MKV files go out as `video/x-mkv`. Subtitles need an explicit "enable" after loading.
 - **Remote apps by ID.** Samsung TVs ignore the "list installed apps" request, so known app IDs are
-  checked one by one.
+  checked with at most four requests at a time. REST launches use an empty POST, then wait up to
+  10 s for `visible: true`; `running` alone can mean a background app. Unconfirmed launches show
+  an error. App titles, the current HDMI input and apps outside the known list are not reported.
 
 ## Security
 
@@ -77,6 +80,7 @@ doesn't lose the TV or its pairing.
   address stops answering, exactly one device claims to be it, and that device presents the
   pinned certificate. A device forwarding to the real TV can't pass the first check, because
   forwarding needs the TV still reachable. Any TV claimed by two addresses at once is ignored.
+- App status and launch use Samsung's unauthenticated REST API on the local network.
 - `state.json` holds the pairing token and is readable only by you.
 
 Not protected: anything on your network can pretend to be an *unpaired* TV, and anything holding

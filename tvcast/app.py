@@ -635,7 +635,7 @@ class App:
         elif action == "apps":
             return {"apps": self.remote.apps(self.remote_tv())}
         elif action == "launch":
-            self.remote.launch(self.remote_tv(), str(body["id"]))
+            return {"ok": True, "app": self.remote.launch(self.remote_tv(), str(body["id"]))}
         else:
             raise ValueError("unknown action %r" % action)
         return {"ok": True}

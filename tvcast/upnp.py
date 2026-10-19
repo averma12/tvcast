@@ -112,7 +112,8 @@ def tv_status(tv, timeout):
             volume = tag(rendering(tv, "GetVolume", timeout=timeout), "CurrentVolume")
             status["volume"] = int(volume) if volume and volume.isdigit() else None
         with contextlib.suppress(RuntimeError):
-            status["muted"] = tag(rendering(tv, "GetMute", timeout=timeout), "CurrentMute") == "1"
+            muted = tag(rendering(tv, "GetMute", timeout=timeout), "CurrentMute")
+            status["muted"] = {"1": True, "0": False, "true": True, "false": False}.get(muted)
     return status
 
 

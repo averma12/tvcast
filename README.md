@@ -20,6 +20,10 @@ In the panel:
 2. Samsung only: **Remote → Pair with TV**, then press Allow on the TV.
 3. Hit **Play** on any movie.
 
+The panel shows the TV's volume, mute state and current supported app. Use **Apps** to switch;
+**Open on TV** appears only after the TV confirms it. Search your library or choose
+**Continue watching** to find unfinished movies. Folders, auto-play and connection details fold away.
+
 Needs macOS with the Command Line Tools (`xcode-select --install`).
 Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
 
