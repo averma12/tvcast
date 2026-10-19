@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "tvcast"
 dynamic = ["version"]
-description = "Cast videos from your Mac to DLNA TVs, with a web panel, CLI and Samsung remote."
+description = "Cast videos from your Mac to DLNA TVs, with web and CLI controls, resume, and queues. Samsung TVs also support remote buttons, text input, and app launching."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT AND ISC"

@@ -1,7 +1,8 @@
 # TV Cast
 
-Play the videos on your Mac on any TV in your home. No app on the TV, no cloud, no converting.
-Control it from a web page or the `tv` command. On Samsung TVs it also works as a remote.
+Cast videos from your Mac to DLNA TVs, with web and CLI controls, resume, and queues.
+Samsung TVs also support remote buttons, text input, and app launching.
+No app on the TV, no cloud, no converting.
 
 ![TV Cast with playback controls, a queue and removable folder tags](https://raw.githubusercontent.com/thepushkarp/tvcast/main/docs/images/demo-dark.jpg)
 
