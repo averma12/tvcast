@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tvcast"
+dynamic = ["version"]
+description = "Cast videos from your Mac to DLNA TVs, with a web panel, CLI and Samsung remote."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT AND ISC"
+license-files = ["LICENSE", "LICENSE-ICONS"]
+authors = [{name = "Pushkar"}]
+keywords = ["macos", "dlna", "upnp", "samsung", "tv", "casting", "video", "remote"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Video",
+]
+dependencies = []
+
+[project.scripts]
+tv = "tvcast.launcher:main"
+
+[project.urls]
+Homepage = "https://github.com/thepushkarp/tvcast"
+Documentation = "https://github.com/thepushkarp/tvcast#readme"
+Issues = "https://github.com/thepushkarp/tvcast/issues"
+Source = "https://github.com/thepushkarp/tvcast"
+
+[tool.hatch.version]
+path = "tvcast/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tvcast"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/tvcast", "/tests", "/docs", "/tv", "/README.md", "/LICENSE", "/LICENSE-ICONS", "/pyproject.toml"]
+exclude = ["/docs/images"]

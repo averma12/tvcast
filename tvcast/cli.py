@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
+from . import __version__
 from .app import App
 from .state import DEFAULT_STATE
 from .upnp import hms, seconds_of
@@ -26,7 +27,7 @@ NOT_RUNNING = ("TV Cast isn't running (nothing on 127.0.0.1:%d); start it with \
 LABEL = "local.tvcast"
 PLIST = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % LABEL)
 LOG = os.path.expanduser("~/Library/Logs/tvcast.log")
-SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "tv")
+SCRIPT = os.path.join(os.path.dirname(os.path.realpath(__file__)), "launcher.py")
 # macOS privacy protection (TCC) keeps launchd agents out of these folders, so a login service
 # couldn't even load its code from there.
 PRIVATE_FOLDERS = ("~/Desktop", "~/Documents", "~/Downloads")
@@ -196,6 +197,7 @@ def uninstall():
 
 def main():
     p = argparse.ArgumentParser(prog="tv", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version", version="TV Cast " + __version__)
     sub = p.add_subparsers(dest="cmd", required=True, metavar="COMMAND")
     port = argparse.ArgumentParser(add_help=False)
     port.add_argument("--panel-port", type=int, default=PANEL_PORT, help="the daemon's panel port (default %(default)s)")
