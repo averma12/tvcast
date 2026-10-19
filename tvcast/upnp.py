@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
 SOAP_TIMEOUT = 8
+MAX_XML = 1 << 20  # bytes read of a device's XML; real descriptions and replies are a few KB
 DLNA_FEATURES = "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
 
 
@@ -39,6 +40,18 @@ def tag(xml, name):
     return m[1] if m else None
 
 
+def parse_xml(text, what):
+    """Parse XML that a device on the LAN sent; what names it in errors."""
+    # Entities can only be declared in a DTD, and the expat bundled with Apple's Python 3.9 has
+    # no guard against entity-expansion bombs. UPnP documents never have a DTD.
+    if "<!DOCTYPE" in text or "<!ENTITY" in text:
+        raise RuntimeError("%s has a DTD, which UPnP doesn't use" % what)
+    try:
+        return ET.fromstring(text)
+    except ET.ParseError as e:
+        raise RuntimeError("%s is not valid XML: %s" % (what, e))
+
+
 def soap(tv, service, action, timeout=SOAP_TIMEOUT, **args):
     """Invoke action on the TV's service and return the response XML."""
     svc = tv["services"].get(service)
@@ -62,9 +75,9 @@ def soap(tv, service, action, timeout=SOAP_TIMEOUT, **args):
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", "replace")
+            return resp.read(MAX_XML).decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")
+        detail = e.read(MAX_XML).decode(errors="replace")
         raise RuntimeError("%s on TV %s failed: HTTP %d: %s"
                            % (action, tv["name"], e.code, tag(detail, "errorDescription") or detail.strip()))
     except (OSError, http.client.HTTPException) as e:  # URLError, timeouts, refusals, non-HTTP replies
@@ -109,13 +122,13 @@ def has_caption_control(tv):
     return "Samsung" in tv.get("manufacturer", "")
 
 
-def caption_files(escaped):
+def caption_files(escaped, what):
     """Parse caption-state XML, which the TV sends HTML-escaped inside its SOAP reply,
-    into X_ControlCaption arguments: one dict per subtitle file."""
+    into X_ControlCaption arguments: one dict per subtitle file. what names it in errors."""
     if not escaped:
         return []
     files = []
-    for res in ET.fromstring(html.unescape(escaped)):
+    for res in parse_xml(html.unescape(escaped), what):
         for info in res.iter("captionFileInfo"):
             # Insertion order matters: UPnP arguments must follow the order in the TV's SCPD.
             files.append({
@@ -132,7 +145,8 @@ def caption_files(escaped):
 def captions(tv):
     """(available, enabled) subtitle files as a Samsung TV's player reports them."""
     x = soap(tv, "RenderingControl", "X_GetCaptionState", InstanceID=0)
-    return caption_files(tag(x, "Captions")), caption_files(tag(x, "EnabledCaptions"))
+    what = "caption state from TV %s" % tv["name"]
+    return caption_files(tag(x, "Captions"), what), caption_files(tag(x, "EnabledCaptions"), what)
 
 
 def set_subtitles(tv, on):

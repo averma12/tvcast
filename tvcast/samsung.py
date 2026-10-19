@@ -51,6 +51,27 @@ def paired(tv):
     return bool(tv.get("remote_token") and tv.get("remote_cert"))
 
 
+def open_tls(ip):
+    """A TLS socket to the TV's remote channel and the SHA-256 fingerprint of its certificate."""
+    ctx = ssl.create_default_context()
+    # The TV's certificate is self-signed, so no CA can vouch for it. Instead its fingerprint is
+    # pinned at pairing and must match on every later connection.
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    sock = ctx.wrap_socket(socket.create_connection((ip, REMOTE_PORT), timeout=5), server_hostname=ip)
+    return sock, hashlib.sha256(sock.getpeercert(binary_form=True)).hexdigest()
+
+
+def fingerprint(ip):
+    """The certificate fingerprint open_tls sees at ip, or None when nothing there answers TLS."""
+    try:
+        sock, cert = open_tls(ip)
+    except OSError:  # refused, timed out or no TLS: nothing there can match a pinned certificate
+        return None
+    sock.close()
+    return cert
+
+
 class WebSocket:
     """Just enough of RFC 6455 for the TV's remote channel: JSON text frames both ways."""
 
@@ -129,15 +150,9 @@ class Remote:
         token = None if pairing else tv.get("remote_token")
         if token:
             query += "&token=" + urllib.parse.quote(token)
-        ctx = ssl.create_default_context()
-        # The TV's certificate is self-signed, so no CA can vouch for it. Instead its fingerprint
-        # is pinned at pairing and must match on every later connection.
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
         try:
-            sock = ctx.wrap_socket(socket.create_connection((ip, REMOTE_PORT), timeout=5), server_hostname=ip)
-            fingerprint = hashlib.sha256(sock.getpeercert(binary_form=True)).hexdigest()
-            if not pairing and fingerprint != tv.get("remote_cert"):
+            sock, cert = open_tls(ip)
+            if not pairing and cert != tv.get("remote_cert"):
                 sock.close()
                 raise RuntimeError(
                     "TV %s presented a different certificate than when paired; if the TV was"
@@ -180,7 +195,7 @@ class Remote:
             if not new_token:
                 ws.close()
                 raise RuntimeError("TV %s allowed the connection but issued no token to remember" % name)
-            self.state.update_tv(tv["id"], remote_cert=fingerprint, remote_token=str(new_token))
+            self.state.update_tv(tv["id"], remote_cert=cert, remote_token=str(new_token))
         sock.settimeout(5)
         return ws
 

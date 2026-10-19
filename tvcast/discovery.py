@@ -9,9 +9,8 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 
-from .upnp import log
+from .upnp import MAX_XML, log, parse_xml
 
 SSDP_ADDR = ("239.255.255.250", 1900)
 SEARCH = (
@@ -24,7 +23,6 @@ SEARCH = (
 ).encode()
 SEARCHES = 3  # SSDP is plain UDP, so repeat the search across the window to ride out lost packets
 DESCRIBE_TIMEOUT = 3
-MAX_DESCRIPTION = 1 << 20  # bytes; real descriptions are a few KB
 NS = {"d": "urn:schemas-upnp-org:device-1-0"}
 SERVICES = ("AVTransport", "RenderingControl")
 
@@ -93,14 +91,10 @@ def describe(location, timeout=DESCRIBE_TIMEOUT):
         raise RuntimeError("device description URL %s is not an http:// URL" % location)
     try:
         with urllib.request.urlopen(location, timeout=timeout) as resp:
-            text = resp.read(MAX_DESCRIPTION).decode("utf-8-sig")  # UPnP mandates UTF-8
-        # Entities can only be declared in a DTD, and the expat bundled with Apple's Python 3.9
-        # has no guard against entity-expansion bombs. UPnP descriptions never have a DTD.
-        if "<!DOCTYPE" in text:
-            raise RuntimeError("device description %s has a DTD, which UPnP doesn't use" % location)
-        root = ET.fromstring(text)
-    except (OSError, ValueError, http.client.HTTPException, ET.ParseError) as e:
+            text = resp.read(MAX_XML).decode("utf-8-sig")  # UPnP mandates UTF-8
+    except (OSError, ValueError, http.client.HTTPException) as e:
         raise RuntimeError("reading device description %s failed: %s" % (location, e))
+    root = parse_xml(text, "device description %s" % location)
     base = _text(root, "d:URLBase") or location
     host = urllib.parse.urlsplit(location).hostname
     for device in root.iter("{%s}device" % NS["d"]):

@@ -151,11 +151,19 @@ class App:
 
     def discover(self):
         """Search the network for TVs and remember them; returns the TVs found."""
-        found = discovery.discover()
-        for tv in found:
+        found = []
+        for tv in discovery.discover():
+            known = self.state.tv(tv["id"]) or {}
+            # Any device on the LAN can answer with a known TV's id, and the stream server serves
+            # whatever address the TV record holds. A paired TV's pinned certificate proves a move;
+            # other TVs have no such anchor, so their address follows discovery.
+            if known.get("remote_cert") and tv["ip"] != known["ip"] and samsung.fingerprint(tv["ip"]) != known["remote_cert"]:
+                log("ignoring %s at %s: its certificate doesn't match the paired TV" % (tv["name"], tv["ip"]))
+                continue
             # A paired TV keeps its remote even when its REST API is slow to answer this time.
-            tv["remote"] = samsung.paired(self.state.tv(tv["id"]) or {}) or samsung.has_remote(tv["ip"])
+            tv["remote"] = samsung.paired(known) or samsung.has_remote(tv["ip"])
             self.state.update_tv(tv["id"], **tv)
+            found.append(tv)
         return found
 
     def discover_at_start(self):

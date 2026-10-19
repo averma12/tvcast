@@ -1,4 +1,5 @@
 """Odd replies from TVs degrade gracefully instead of escaping the RuntimeError contract."""
+import html
 import socketserver
 import threading
 import unittest
@@ -60,6 +61,11 @@ class FailureTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         with mock.patch.object(samsung, "REST_PORT", server.server_address[1]):
             self.assertFalse(samsung.has_remote("127.0.0.1"))
+
+    def test_caption_state_with_a_dtd_is_refused(self):
+        bomb = '<!DOCTYPE c [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;">]><captions>&b;</captions>'
+        with self.assertRaisesRegex(RuntimeError, "caption state from TV Test TV has a DTD"):
+            upnp.caption_files(html.escape(bomb), "caption state from TV Test TV")
 
 
 if __name__ == "__main__":
