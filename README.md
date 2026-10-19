@@ -22,7 +22,7 @@ In the panel:
 
 The panel shows the TV's volume, mute state and current supported app. Use **Apps** to switch;
 **Open on TV** appears only after the TV confirms it. Search your library or choose
-**Continue watching** to find unfinished movies. Folders, auto-play and connection details fold away.
+**Continue watching** to find unfinished movies. Add movies to **Queue** to play them in order.
 
 Needs macOS with the Command Line Tools (`xcode-select --install`).
 Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
@@ -54,6 +54,6 @@ Optional: `brew install ffmpeg` so TV Cast can flag videos the TV can't play.
 
 ## More
 
-- [Your library](docs/library.md): folder layout, subtitles, resume and auto-play
+- [Your library](docs/library.md): folders, subtitles, resume and queue
 - [Troubleshooting](docs/troubleshooting.md)
 - [How it works](docs/how-it-works.md): for developers

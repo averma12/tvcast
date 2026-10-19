@@ -1,4 +1,4 @@
-"""The daemon: TV selection, the library, playback tracking with resume points and auto-play,
+"""The daemon: TV selection, the library, playback tracking with resume points and a queue,
 and the actions behind the control panel's API."""
 import collections
 import contextlib
@@ -103,8 +103,12 @@ class App:
         self.stats = Stats()
         self.remote = samsung.Remote(self.state)
         # Guards current, movies, by_id, library_problems, library_private, scanning,
-        # rescan_pending, probing and caffeinate, and keeps the TV selection in step with current.
+        # rescan_pending, probing, the playback queue and caffeinate.
         self.lock = threading.RLock()
+        # Serialize playback changes across HTTP requests and the monitor. Never hold self.lock
+        # during a TV request: status and queue editing must stay responsive while a movie loads.
+        self.playback_lock = threading.RLock()
+        self.queue_error = None
         self.current = None
         self.movies, self.by_id, self.library_problems, self.library_private = [], {}, {}, {}
         self.scanning = self.rescan_pending = False
@@ -201,11 +205,11 @@ class App:
         tv = self.state.tv(tv_id)
         if tv is None:
             raise ValueError("no known TV with id %r; search for TVs first" % tv_id)
-        with self.lock:
+        with self.playback_lock, self.lock:
             if self.state.get("tv") == tv_id:
                 return
             # The old TV gets no Stop, but the stream server stops serving it, so its playback
-            # ends once its buffer runs out. Tracking it (resume point, auto-play) ends here.
+            # ends once its buffer runs out. Tracking and queue advancement end here.
             self.state.set("tv", tv_id)
             pb, self.current = self.current, None
             self.keep_awake(False)
@@ -269,17 +273,65 @@ class App:
         with self.lock:
             return self.by_id.get(movie_id)
 
-    def next_after(self, movie):
-        """The next playable video in the same collection, for auto-play."""
+    def edit_queue(self, action, body):
         with self.lock:
-            siblings = [m for m in self.movies if m.group == movie.group]
-        ids = [m.id for m in siblings]
-        if movie.id not in ids:
-            return None
-        for m in siblings[ids.index(movie.id) + 1:]:
-            if playability(self.probe_info(m)) is None:
-                return m
-        return None
+            items = list(self.state.get("queue"))
+            movie_id = str(body.get("id", ""))
+            ids = [item["id"] for item in items]
+            if action == "queue_add":
+                movie = self.lookup(movie_id)
+                if movie is None or movie.root not in self.state.get("libraries"):
+                    raise ValueError("no video with id %r in the library" % movie_id)
+                if self.current and self.current.movie.id == movie_id:
+                    raise ValueError("%s is already playing" % movie.title)
+                if movie_id not in ids:
+                    # Keep the label when a drive is disconnected; unavailable entries remain
+                    # visible and removable rather than silently losing the user's queue.
+                    items.append({"id": movie.id, "title": movie.title, "year": movie.year})
+            elif action == "queue_clear":
+                items = []
+            elif action in ("queue_remove", "queue_move"):
+                if movie_id not in ids:
+                    raise ValueError("video %r is no longer in the queue" % movie_id)
+                index = ids.index(movie_id)
+                if action == "queue_remove":
+                    items.pop(index)
+                else:
+                    direction = body.get("direction")
+                    if type(direction) is not int or direction not in (-1, 1):
+                        raise ValueError("queue direction must be -1 or 1")
+                    target = max(0, min(len(items) - 1, index + direction))
+                    items.insert(target, items.pop(index))
+            else:
+                raise ValueError("unknown queue action %r" % action)
+            self.state.set("queue", items)
+            self.queue_error = None
+
+    def consume_queued(self, movie_id):
+        with self.lock:
+            items = self.state.get("queue")
+            remaining = [item for item in items if item["id"] != movie_id]
+            if remaining != items:
+                self.state.set("queue", remaining)
+            self.queue_error = None
+
+    def play_next(self):
+        with self.playback_lock:
+            with self.lock:
+                items = self.state.get("queue")
+                if not items:
+                    raise ValueError("the queue is empty")
+                item = items[0]
+            try:
+                movie = self.lookup(item["id"])
+                if movie is None or movie.root not in self.state.get("libraries") or not os.path.isfile(movie.path):
+                    raise ValueError("%s is unavailable; reconnect its folder and rescan, or remove it from the queue"
+                                     % item["title"])
+                self.open_movie(movie.id)
+            except (RuntimeError, ValueError) as e:
+                with self.lock:
+                    self.queue_error = str(e)
+                raise
 
     def add_folder(self):
         path = choose_folder()
@@ -328,9 +380,15 @@ class App:
                 self.caffeinate = None
 
     def open_movie(self, movie_id, from_start=False):
+        with self.playback_lock:
+            self._open_movie(movie_id, from_start)
+
+    def _open_movie(self, movie_id, from_start):
         movie = self.lookup(movie_id)
-        if movie is None:
+        if movie is None or movie.root not in self.state.get("libraries"):
             raise ValueError("no video with id %r in the library" % movie_id)
+        if not os.path.isfile(movie.path):
+            raise ValueError("%s is unavailable; reconnect its folder and rescan" % movie.title)
         tv = self.require_tv()
         start = None if from_start else self.state.movie(movie.path).get("position", 0)
         if start is not None and start < RESUME_MIN:
@@ -352,6 +410,7 @@ class App:
                     self.current = None
                     self.keep_awake(False)
             raise
+        self.consume_queued(movie.id)
 
     def load(self, pb, start):
         sub_xml = ""
@@ -438,11 +497,12 @@ class App:
             return
         pb = Playback(movie, tv, m[1])
         pb.seen_playing = True
-        with self.lock:
+        with self.playback_lock, self.lock:
             # Another TV may have been selected while this one was being asked.
             if self.current is not None or self.state.get("tv") != tv["id"]:
                 return
             self.current = pb
+            self.consume_queued(movie.id)
             self.keep_awake(True)
         log("picked up %s, already on %s" % (movie.title, tv["name"]))
 
@@ -455,7 +515,7 @@ class App:
                 pb.unreachable_since = now
                 log("TV unreachable: %s" % e)
             elif now - pb.unreachable_since > OFFLINE_GRACE:
-                self.finish(pb, autoplay=False)
+                self.finish(pb, advance=False)
             return
         pb.unreachable_since = None
         if s["state"] in ("PLAYING", "PAUSED_PLAYBACK") and s["uri"] == pb.media_url:
@@ -471,7 +531,8 @@ class App:
             # Stopped, ran out, or the TV moved on to other media.
             pb.stopped_polls += 1
             if pb.stopped_polls >= STOP_CONFIRM:
-                self.finish(pb)
+                self.finish(pb, advance=s["state"] in ("STOPPED", "NO_MEDIA_PRESENT")
+                            and s["uri"] in (None, "", pb.media_url))
 
     def save_progress(self, pb):
         if pb.position is None:
@@ -487,26 +548,22 @@ class App:
         )
         pb.last_saved = time.time()
 
-    def finish(self, pb, autoplay=True):
-        with self.lock:
-            if self.current is not pb:
+    def finish(self, pb, advance=True):
+        with self.playback_lock:
+            with self.lock:
+                if self.current is not pb:
+                    return
+                self.current = None
+                self.keep_awake(False)
+            self.save_progress(pb)
+            ran_out = bool(pb.duration) and pb.position is not None and pb.position >= pb.duration - END_SLACK
+            log("%s %s at %s" % ("finished" if ran_out else "stopped", pb.movie.title, hms(pb.position)))
+            if not (ran_out and advance and self.state.get("queue")) or self.state.get("tv") != pb.tv["id"]:
                 return
-            self.current = None
-            self.keep_awake(False)
-        self.save_progress(pb)
-        ran_out = bool(pb.duration) and pb.position is not None and pb.position >= pb.duration - END_SLACK
-        log("%s %s at %s" % ("finished" if ran_out else "stopped", pb.movie.title, hms(pb.position)))
-        # Auto-play stays on the TV that ran out; another TV may have been selected meanwhile.
-        if not (ran_out and autoplay and self.state.get("autoplay")) or self.state.get("tv") != pb.tv["id"]:
-            return
-        nxt = self.next_after(pb.movie)
-        if nxt is None:
-            return
-        log("auto-playing %s" % nxt.title)
-        try:
-            self.open_movie(nxt.id)
-        except RuntimeError as e:
-            log("could not auto-play %s: %s" % (nxt.title, e))
+            try:
+                self.play_next()
+            except (RuntimeError, ValueError) as e:
+                log("queue paused: %s" % e)  # play_next also exposes this error in the panel
 
     # Panel API
 
@@ -535,8 +592,9 @@ class App:
             pb, movies = self.current, list(self.movies)
             problems, private = dict(self.library_problems), dict(self.library_private)
             scanning, checking = self.scanning, len(self.probing)
-        up_next = self.next_after(pb.movie) if pb is not None else None
+            queued, queue_error = list(self.state.get("queue")), self.queue_error
         movies = [m for m in movies if m.root in libraries]
+        available = {m.id for m in movies}
         groups = []
         for m in movies:  # already in display order
             if not groups or groups[-1]["id"] != m.group:
@@ -546,7 +604,8 @@ class App:
                 "id": pb.movie.id, "title": pb.movie.title, "year": pb.movie.year,
                 "file": os.path.basename(pb.movie.path),
             },
-            "up_next": up_next.id if up_next else None,
+            "queue": [dict(item, available=item["id"] in available) for item in queued],
+            "queue_error": queue_error,
             "libraries": [
                 {"path": p, "name": os.path.basename(p) or p, "problems": problems.get(p, []), "private": private.get(p, [])}
                 for p in libraries
@@ -555,7 +614,6 @@ class App:
             "library": [self.movie_info(m) for m in movies],
             "scanning": scanning,
             "checking": checking,
-            "autoplay": self.state.get("autoplay"),
             "tvs": tv_list(self.state.tvs()),
             "selected": tv["id"] if tv else None,
             "remote": {"available": bool(tv and tv.get("remote")), "paired": bool(tv and samsung.paired(tv))},
@@ -587,14 +645,17 @@ class App:
         if action == "open":
             self.open_movie(str(body["id"]), from_start=bool(body.get("from_start")))
         elif action == "stop":
-            tv = self.require_tv()
-            with self.lock:
-                pb = self.current
-            transport(tv, "Stop")
-            if pb is not None:
-                self.finish(pb, autoplay=False)
-        elif action == "autoplay":
-            self.state.set("autoplay", bool(body["on"]))
+            with self.playback_lock:
+                tv = self.require_tv()
+                with self.lock:
+                    pb = self.current
+                transport(tv, "Stop")
+                if pb is not None:
+                    self.finish(pb, advance=False)
+        elif action in ("queue_add", "queue_remove", "queue_move", "queue_clear"):
+            self.edit_queue(action, body)
+        elif action == "queue_next":
+            self.play_next()
         elif action == "play":
             transport(self.require_tv(), "Play", Speed=1)
         elif action == "pause":

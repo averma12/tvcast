@@ -30,7 +30,7 @@ so they never disagree.
 | `tvcast/upnp.py` | SOAP calls to the TV: play, pause, seek, volume, Samsung subtitles. |
 | `tvcast/samsung.py` | Samsung remote: pairing, keys, typing, apps. |
 | `tvcast/library.py` | Folder scanning, titles, subtitle matching, codec checks. |
-| `tvcast/state.py` | The JSON state file. |
+| `tvcast/state.py` | The JSON state file, including the ordered playback queue. |
 | `tvcast/panel.html` | One HTML file, plain JavaScript. Status polls every 2 s (10 s in a background tab); app checks every 15 s. |
 
 ## Playing a movie
@@ -41,7 +41,7 @@ open → SetAVTransportURI (video URL + title + subtitles)
      → Seek            to the resume point
      → subtitles on    Samsung only
 then every 2 s: ask the TV where it is; save the position every 10 s
-when it ends: mark progress, maybe auto-play the next movie in the collection
+when it ends: mark progress, then play the next queued movie if there is one
 ```
 
 TVs are stored by their device ID (UDN), not their IP address, so a new address from the router
@@ -61,6 +61,9 @@ doesn't lose the TV or its pairing.
   folders, so `tv install` refuses them.
 - **Retrying Play/Seek on error 701.** TVs load a new video in the background and reject commands
   until ready.
+- **Queue consumption after loading.** Entries leave the queue only after playback loads, so
+  failed requests can be retried. A playback lock serializes starts, stops and TV selection with
+  the monitor's queue advancement; status and queue edits remain responsive during TV requests.
 - **Samsung extras.** The `CaptionInfo.sec` header and `sec:` tags attach subtitles; other TVs
   ignore them. MKV files go out as `video/x-mkv`. Subtitles need an explicit "enable" after loading.
 - **Remote apps by ID.** Samsung TVs ignore the "list installed apps" request, so known app IDs are

@@ -124,12 +124,27 @@
   .bar { height: 3px; margin-top: 8px; background: var(--control); border-radius: 3px; overflow: hidden; }
   .bar span { display: block; height: 100%; background: var(--accent); }
   .empty { color: var(--muted); padding: 30px 0; }
-  .switch { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
-  .switch input { width: 16px; height: 16px; accent-color: var(--accent); }
   .folders { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
-  .folder { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; max-width: 100%; }
+  .folder { display: inline-flex; align-items: center; gap: 4px; padding-left: 12px; border: 1px solid var(--line); background: var(--surface); border-radius: 24px; font-size: 13px; max-width: 100%; }
   .folder span { overflow-wrap: anywhere; }
-  .folder button { font-size: 12px; color: var(--muted); }
+  .icon-button { display: inline-grid; place-items: center; flex: none; width: 36px; min-height: 36px; padding: 0; border: none; border-radius: 50%; color: var(--muted); }
+  .icon { display: block; width: 16px; height: 16px; background: currentColor; mask: var(--icon) center / contain no-repeat; }
+  .folder-notes { display: grid; gap: 6px; margin-top: 10px; }
+  #folders { margin: 0; }
+  .folder-notes:empty { display: none; }
+  .icon-x { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M18%206%206%2018%22%20%2F%3E%3Cpath%20d%3D%22m6%206%2012%2012%22%20%2F%3E%3C%2Fsvg%3E"); }
+  .icon-up { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m5%2012%207-7%207%207%22%20%2F%3E%3Cpath%20d%3D%22M12%2019V5%22%20%2F%3E%3C%2Fsvg%3E"); }
+  .icon-down { --icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%205v14%22%20%2F%3E%3Cpath%20d%3D%22m19%2012-7%207-7-7%22%20%2F%3E%3C%2Fsvg%3E"); }
+  .queue { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 24px; }
+  .queue h2 { font-size: 16px; }
+  .queue-tools { display: flex; align-items: center; gap: 6px; }
+  .queue-list { list-style: none; margin: 10px 0 0; padding: 0; }
+  .queue-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; }
+  .queue-index { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .queue-title { font-size: 14px; overflow-wrap: anywhere; }
+  .queue-list .actions { gap: 0; }
+  .queue-list .actions button { min-width: 36px; }
+  .queue-empty { margin-top: 10px; }
   .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
   .stats dt { color: var(--muted); font-size: 12px; }
   .stats dd { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; }
@@ -174,7 +189,7 @@
   @media (max-height: 850px) { .remote-panel { position: static; } }
   @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
-<!-- Dropdown chevron: https://lucide.dev/icons/chevron-down
+<!-- Icons: https://lucide.dev (chevron-down, x, arrow-up, arrow-down)
 ISC License
 
 Copyright (c) 2026 Lucide Icons and Contributors
@@ -286,11 +301,17 @@ SOFTWARE.
         <p class="note" id="upnext"></p>
       </section>
       <p class="msg" id="msg" role="status"></p>
+      <section class="queue" aria-labelledby="queueTitle">
+        <div class="row"><h2 id="queueTitle">Queue<span class="count" id="queueCount">0</span></h2><div class="queue-tools"><button id="clearQueue" class="link-button" hidden>Clear</button><button id="playQueue" hidden>Play queue</button></div></div>
+        <ol class="queue-list" id="queueList"></ol>
+        <p class="note queue-empty" id="queueEmpty">Add movies from your library.</p>
+        <p class="msg" id="queuemsg" role="status"></p>
+      </section>
       <section aria-labelledby="libraryTitle">
         <div class="row"><h2 id="libraryTitle">Your library<span class="count" id="libraryCount"></span></h2><button class="link-button" id="rescan">Rescan</button></div>
         <div class="library-tools"><input type="search" id="search" aria-label="Search library" placeholder="Search your movies"><span class="select-wrap"><select id="filter" aria-label="Filter library"><option value="all">All movies</option><option value="continue">Continue watching</option><option value="unwatched">Unwatched</option></select></span></div>
         <p class="note" id="libraryNote"></p>
-        <details id="librarySettings" class="library-settings"><summary>Library folders &amp; auto-play</summary><label class="switch"><input type="checkbox" id="autoplay">Auto-play next in collection</label><div id="folders"></div><button id="addFolder">Add folder</button></details>
+        <details id="librarySettings" class="library-settings"><summary>Folders</summary><div class="folders"><div class="folders" id="folders"></div><button id="addFolder">Add folder</button></div><div class="folder-notes" id="folderNotes"></div></details>
         <p class="msg" id="libmsg" role="status"></p>
         <div id="libbody"></div>
       </section>
@@ -313,10 +334,10 @@ const ago = s => s == null ? 'No requests yet' : s < 2 ? 'Just now' : s < 120 ? 
 const STATES = {PLAYING:'Playing from your Mac', PAUSED_PLAYBACK:'Paused', STOPPED:'Stopped', TRANSITIONING:'Loading…', NO_MEDIA_PRESENT:'No media loaded'};
 const RESUME_MIN = 30;
 let st = null, online = false, selecting = false, finding = false, pairing = false;
-let opening = null, choosingFolder = false, seeking = false, volDragging = false;
+let opening = null, choosingFolder = false, seeking = false, volDragging = false, queueBusy = false;
 let apps = null, appsLoading = false, appsAt = 0, appsNext = 0, appsGeneration = 0, appsSig = '';
 let remoteTv = null, launching = null, powerArmed = false, powerTimer;
-let tvSig = '', libSig = '', folderSig = '', refreshId = 0;
+let tvSig = '', libSig = '', folderSig = '', queueSig = '', refreshId = 0;
 const errors = {};
 const show = (id, text, info = false) => { $(id).textContent = text || ''; $(id).className = 'msg' + (info ? ' info' : ''); };
 const canControl = () => online && !selecting && !!st?.selected;
@@ -389,7 +410,7 @@ function renderStatus() {
   $('subctl').hidden = subs == null;
   $('subOn').setAttribute('aria-pressed', String(subs === true));
   $('subOff').setAttribute('aria-pressed', String(subs === false));
-  const next = st.autoplay && st.library.find(m => m.id === st.up_next);
+  const next = st.queue[0];
   $('upnext').textContent = next ? 'Up next: ' + next.title : '';
   show('msg', errors.msg || (st.now && st.tv_error));
 }
@@ -402,13 +423,15 @@ function movieRow(m) {
   const current = st.now?.id === m.id;
   const partial = m.position >= RESUME_MIN;
   const meta = [m.year, runtime(m.duration), m.subs ? 'Subtitles' : '', !current && partial ? `Resume at ${clock(m.position)}` : m.watched ? 'Watched' : ''];
-  const tag = current ? 'Casting' : m.id === st.up_next && st.autoplay ? 'Up next' : '';
+  const queued = st.queue.some(item => item.id === m.id);
+  const tag = current ? 'Casting' : '';
   let actions = '';
   if (!current) {
-    const disabled = !canControl() || !st.tv || opening ? 'disabled' : '';
+    const disabled = !canControl() || !st.tv || opening || queueBusy ? 'disabled' : '';
     const label = opening === m.id ? 'Opening…' : m.problem ? 'Try anyway' : partial ? 'Resume' : 'Play';
     actions = `<button ${partial ? 'class="primary"' : ''} data-open="${m.id}" aria-label="${esc(label + ' ' + m.title)}" ${disabled}>${label}</button>`;
     if (partial || m.watched) actions += `<button data-open="${m.id}" data-from-start="1" aria-label="${esc('Start ' + m.title + ' over')}" ${disabled}>Start over</button>`;
+    actions += `<button data-queue="${m.id}" aria-label="${esc((queued ? 'Queued: ' : 'Queue ') + m.title)}" ${!online || queueBusy || queued || opening === m.id ? 'disabled' : ''}>${queued ? 'Queued' : 'Queue'}</button>`;
   }
   const bar = !current && partial && m.duration ? `<div class="bar"><span style="width:${Math.min(100, m.position / m.duration * 100)}%"></span></div>` : '';
   return `<li class="${current ? 'current' : ''}"><div class="info"><div class="name">${esc(m.title)}${tag ? `<span class="tag">${tag}</span>` : ''}</div><div class="meta">${meta.filter(Boolean).map(t => `<span>${esc(t)}</span>`).join('')}${m.problem ? `<span class="warn">${esc(m.problem)}</span>` : m.checking ? '<span>Checking format…</span>' : ''}</div>${bar}</div><div class="actions">${actions}</div></li>`;
@@ -416,10 +439,10 @@ function movieRow(m) {
 function renderLibrary() {
   if (!st) return;
   const query = $('search').value.trim().toLocaleLowerCase(), filter = $('filter').value;
-  const sig = JSON.stringify([st.library, st.groups, st.libraries, st.scanning, st.now, st.up_next, st.autoplay, opening, canControl(), !!st.tv, query, filter]);
+  const sig = JSON.stringify([st.library, st.groups, st.libraries, st.scanning, st.now, st.queue, queueBusy, opening, canControl(), !!st.tv, query, filter]);
   if (sig !== libSig) {
     libSig = sig;
-    const movies = st.library.filter(m => `${m.title} ${m.year || ''}`.toLocaleLowerCase().includes(query) && (filter === 'all' || (filter === 'continue' ? m.position >= RESUME_MIN && !m.watched : !m.watched)));
+    const movies = st.library.filter(m => `${m.title} ${m.year || ''}`.toLocaleLowerCase().includes(query) && (filter === 'all' || (filter === 'continue' ? m.position >= RESUME_MIN : !m.watched)));
     $('libraryCount').textContent = movies.length === st.library.length ? ` ${movies.length} ${movies.length === 1 ? 'movie' : 'movies'}` : ` ${movies.length} of ${st.library.length}`;
     let out = '';
     for (const g of st.groups) {
@@ -428,21 +451,48 @@ function renderLibrary() {
     }
     $('libbody').innerHTML = out || `<p class="empty">${st.scanning ? 'Finding your movies…' : query || filter !== 'all' ? 'No matching movies. Try another search or filter.' : st.libraries.length ? 'No videos found. Add another folder below.' : 'Add a folder below to find your movies.'}</p>`;
   }
-  $('autoplay').checked = !!st.autoplay;
   $('rescan').disabled = !online || st.scanning;
   $('rescan').textContent = st.scanning ? 'Scanning…' : 'Rescan';
   const problems = st.libraries.reduce((n, l) => n + l.problems.length, 0);
-  $('libraryNote').textContent = problems ? 'Some folders could not be read. Open Library folders for details.' : st.checking ? `Checking video formats (${st.checking} left)…` : '';
+  $('libraryNote').textContent = problems ? 'Some folders are unavailable. See Folders.' : st.checking ? `Checking video formats (${st.checking} left)…` : '';
   const folders = JSON.stringify(st.libraries);
   if (folders !== folderSig) {
     folderSig = folders;
-    $('folders').innerHTML = st.libraries.map(l => `<div class="folders"><span class="folder"><span title="${esc(l.path)}">${esc(l.name)}</span><button data-remove="${esc(l.path)}" aria-label="Remove ${esc(l.name)} from library">Remove</button></span></div>${l.problems.map(p => `<p class="msg">${esc(p)}</p>`).join('')}${l.private.length ? `<p class="note">Kept private by macOS: ${l.private.map(esc).join(', ')}.</p>` : ''}`).join('');
+    $('folders').innerHTML = st.libraries.map(l => `<span class="folder"><span title="${esc(l.path)}">${esc(l.name)}</span><button class="icon-button" data-remove="${esc(l.path)}" title="Remove folder" aria-label="Remove ${esc(l.name)} from library"><span class="icon icon-x" aria-hidden="true"></span></button></span>`).join('');
+    $('folderNotes').innerHTML = st.libraries.map(l => l.problems.map(p => `<p class="msg">${esc(l.name)}: ${esc(p)}</p>`).join('') + l.private.map(p => `<p class="note" title="macOS denied access to this subfolder. Other folders are still scanned.">Skipped ${esc(l.name + '/' + p)} — macOS restricted access.</p>`).join('')).join('');
   }
   $('addFolder').disabled = choosingFolder || !online;
-  $('autoplay').disabled = !online;
   document.querySelectorAll('[data-remove]').forEach(b => b.disabled = !online);
   $('addFolder').textContent = choosingFolder ? 'Choose a folder on your Mac…' : 'Add folder';
   show('libmsg', errors.libmsg);
+}
+function renderQueue() {
+  const items = st.queue, disabled = !online || queueBusy;
+  const sig = JSON.stringify([items, disabled]);
+  if (sig !== queueSig) {
+    queueSig = sig;
+    $('queueList').innerHTML = items.map((item, i) => `<li><span class="queue-index">${i + 1}</span><div class="queue-title">${esc(item.title)}${item.year ? `<span class="count">${item.year}</span>` : ''}${!item.available ? '<p class="note">Unavailable</p>' : ''}</div><div class="actions">${[-1, 1].map(direction => `<button class="icon-button" data-queue-action="move" data-id="${esc(item.id)}" data-direction="${direction}" title="Move ${direction < 0 ? 'up' : 'down'}" aria-label="${esc('Move ' + item.title + (direction < 0 ? ' up' : ' down'))}" ${disabled || i + direction < 0 || i + direction >= items.length ? 'disabled' : ''}><span class="icon icon-${direction < 0 ? 'up' : 'down'}" aria-hidden="true"></span></button>`).join('')}<button class="icon-button" data-queue-action="remove" data-id="${esc(item.id)}" title="Remove from queue" aria-label="${esc('Remove ' + item.title + ' from queue')}" ${disabled ? 'disabled' : ''}><span class="icon icon-x" aria-hidden="true"></span></button></div></li>`).join('');
+  }
+  $('queueCount').textContent = items.length;
+  $('queueEmpty').hidden = !!items.length;
+  $('clearQueue').hidden = $('playQueue').hidden = !items.length;
+  $('clearQueue').disabled = disabled;
+  $('playQueue').disabled = disabled || !canControl() || !st.tv || !!opening || !items[0]?.available;
+  $('playQueue').textContent = queueBusy && opening ? 'Opening…' : st.now ? 'Play next' : 'Play queue';
+  show('queuemsg', errors.queuemsg || st.queue_error);
+}
+async function queueAction(action, body = {}) {
+  if (queueBusy || !online) return;
+  const focus = document.activeElement.dataset;
+  const focusId = focus.id, focusAction = focus.queueAction, focusDirection = focus.direction;
+  queueBusy = true; renderQueue(); renderLibrary();
+  await act('queue_' + action, body, 'queuemsg');
+  queueBusy = false; renderQueue(); renderLibrary();
+  if (focusId) {
+    const buttons = [...$('queueList').querySelectorAll('button:not(:disabled)')];
+    const target = buttons.find(b => b.dataset.id === focusId && b.dataset.queueAction === focusAction && b.dataset.direction === focusDirection) || buttons.find(b => b.dataset.id === focusId) || buttons[0] || $('search');
+    target.focus({preventScroll:true});
+  }
 }
 function renderRemote() {
   if (st.selected !== remoteTv) {
@@ -518,11 +568,11 @@ async function refresh() {
     if (id !== refreshId) return;
     online = false;
     show('globalmsg', 'Cannot reach TV Cast. Start it with “tv install”, then reload this page.');
-    if (st) { renderRemote(); renderStatus(); renderLibrary(); }
+    if (st) { renderRemote(); renderStatus(); renderLibrary(); renderQueue(); }
     else {
       $('screen').textContent = 'TV Cast is offline'; $('connection').textContent = 'Service offline';
       $('sound').textContent = 'Sound unknown';
-      for (const id of ['rescan', 'autoplay', 'addFolder']) $(id).disabled = true;
+      for (const id of ['rescan', 'addFolder']) $(id).disabled = true;
     }
     $('srv').textContent = 'Service offline';
     return;
@@ -530,7 +580,7 @@ async function refresh() {
   if (id !== refreshId) return;
   st = next; online = true;
   show('globalmsg', errors.globalmsg);
-  renderTvs(); renderRemote(); renderStatus(); renderLibrary(); renderServer();
+  renderTvs(); renderRemote(); renderStatus(); renderLibrary(); renderQueue(); renderServer();
 }
 async function poll() { await refresh(); setTimeout(poll, document.hidden ? 10000 : 2000); }
 function togglePlay() { if (ownsPlayback()) act(st.tv.state === 'PLAYING' ? 'pause' : 'play'); }
@@ -540,7 +590,7 @@ $('tv').onchange = async e => {
   const id = e.target.value;
   selecting = true; appsGeneration++; refreshId++;
   appsLoading = false; launching = null; appsAt = 0; appsNext = 0;
-  renderTvs(); renderRemote(); renderStatus(); renderLibrary();
+  renderTvs(); renderRemote(); renderStatus(); renderLibrary(); renderQueue();
   await act('select', {id}, 'globalmsg');
   selecting = false; tvSig = ''; await refresh();
   show('globalmsg', errors.globalmsg);
@@ -559,14 +609,26 @@ $('subOn').onclick = () => act('subtitles', {on:true});
 $('subOff').onclick = () => act('subtitles', {on:false});
 $('search').oninput = $('filter').onchange = renderLibrary;
 $('rescan').onclick = () => act('rescan', {}, 'libmsg');
-$('autoplay').onchange = e => act('autoplay', {on:e.target.checked}, 'libmsg');
 $('addFolder').onclick = async () => { choosingFolder = true; renderLibrary(); await act('add_folder', {}, 'libmsg'); choosingFolder = false; renderLibrary(); };
 $('folders').onclick = e => { const b = e.target.closest('[data-remove]'); if (b) act('remove_folder', {path:b.dataset.remove}, 'libmsg'); };
 $('libbody').onclick = async e => {
+  const queueButton = e.target.closest('[data-queue]');
+  if (queueButton) { await queueAction('add', {id:queueButton.dataset.queue}); return; }
   const b = e.target.closest('[data-open]');
   if (!b || opening || !canControl()) return;
-  opening = b.dataset.open; renderLibrary(); renderStatus();
+  opening = b.dataset.open; renderLibrary(); renderStatus(); renderQueue();
   await act('open', {id:opening, from_start:b.dataset.fromStart === '1'});
+  opening = null; await refresh();
+};
+$('queueList').onclick = e => {
+  const b = e.target.closest('[data-queue-action]');
+  if (b) queueAction(b.dataset.queueAction, {id:b.dataset.id, direction:+b.dataset.direction});
+};
+$('clearQueue').onclick = () => queueAction('clear');
+$('playQueue').onclick = async () => {
+  if (opening || !canControl() || queueBusy) return;
+  opening = st.queue[0].id; renderQueue(); renderStatus();
+  await queueAction('next');
   opening = null; await refresh();
 };
 document.querySelectorAll('[data-key]').forEach(b => b.onclick = () => remoteKey(b.dataset.key));
