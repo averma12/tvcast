@@ -187,6 +187,10 @@ class App:
         self.probing = set()  # paths queued for or under ffprobe
         self.burns = {}  # movie id -> background burn-in job: title, subtitle, progress, running, error, started
         self.hls = None  # the burn.Hls whose segments the TV is playing, or None
+        # Held while an HLS session is looked up and created, which can take seconds (probing and
+        # drawing the subtitles), so it isn't self.lock: concurrent callers (a TV request and the
+        # monitor both adopting after a restart) share one session instead of building two.
+        self.hls_lock = threading.Lock()
         self.caffeinate = None
         if not os.path.isfile(PANEL_HTML):
             raise SystemExit("control panel page %s is missing" % PANEL_HTML)
@@ -684,14 +688,15 @@ class App:
 
     def hls_session(self, movie, track, srt=None):
         """The HLS segments of movie with track burned in, replacing those of another movie."""
-        with self.lock:
-            current = self.hls
-        if current is not None and current.movie.id == movie.id and current.track == track["id"]:
-            return current
-        session = burn.Hls(movie, srt or prepare(track["path"], self.subtitle_cache))
-        session.track = track["id"]
-        with self.lock:
-            old, self.hls = self.hls, session
+        with self.hls_lock:
+            with self.lock:
+                current = self.hls
+            if current is not None and current.movie.id == movie.id and current.track == track["id"]:
+                return current
+            session = burn.Hls(movie, srt or prepare(track["path"], self.subtitle_cache))
+            session.track = track["id"]
+            with self.lock:
+                old, self.hls = self.hls, session
         if old is not None:
             old.stop()
         return session
@@ -706,7 +711,7 @@ class App:
 
     def drop_hls(self):
         """Stop the HLS session, its encoders and segments, when nothing plays it any more."""
-        with self.lock:
+        with self.hls_lock, self.lock:
             session, self.hls = self.hls, None
         if session is not None:
             session.stop()

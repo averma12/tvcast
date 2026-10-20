@@ -279,9 +279,10 @@ class Hls:
         self.movie, self.sets = movie, read_sets(sup)
         self.duration = self.info["duration"]
         self.count = segment_count(self.duration)
-        self.dir = os.path.join(CACHE, "hls", subs_key(movie, srt))
-        shutil.rmtree(self.dir, ignore_errors=True)
-        os.makedirs(self.dir)
+        # A folder of its own: stopping one session must never delete another's segments, even
+        # one for the same movie and subtitles. clean_up() removes them all at start.
+        os.makedirs(os.path.join(CACHE, "hls"), exist_ok=True)
+        self.dir = tempfile.mkdtemp(dir=os.path.join(CACHE, "hls"))
         self.lock = threading.Condition()
         self.done, self.busy, self.errors = set(), set(), {}
         self.target = None  # nothing is prepared until the TV asks
