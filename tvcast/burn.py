@@ -40,6 +40,7 @@ AHEAD = 10  # segments prepared beyond the one the TV asked for
 WORKERS = 2  # segment encodes at a time; the media engine keeps up with two 4K streams
 # Added to every segment's timestamps, so none starts at 0, which ffmpeg treats as "no offset".
 TS_BASE = 10.0
+SEGMENT_AUDIO = ("-c:a", "eac3", "-b:a", "640k")  # Dolby Digital Plus, as most sources and TVs use
 
 
 def available():
@@ -181,8 +182,9 @@ def segment_sup(sets, start, end, out):
                 pos += 13 + size
 
 
-def video_args(info):
-    """ffmpeg arguments that overlay input 1's subtitles on input 0's video and encode it."""
+def video_args(info, audio=("-c:a", "copy")):
+    """ffmpeg arguments that overlay input 1's subtitles on input 0's video and encode it, with
+    the first audio track handled by `audio` (copied by default)."""
     pix, overlay, profile = ("p010le", "yuv420p10", "main10") if info["ten_bit"] else ("nv12", "yuv420", "main")
     colours = []
     for flag, key in (("-color_primaries", "primaries"), ("-color_trc", "transfer"), ("-colorspace", "space")):
@@ -190,7 +192,7 @@ def video_args(info):
             colours += [flag, info[key]]
     return (["-filter_complex", "[0:v][1:s]overlay=format=%s:eof_action=pass,format=%s[v]" % (overlay, pix),
              "-map", "[v]", "-map", "0:a:0?", "-c:v", "hevc_videotoolbox", "-profile:v", profile,
-             "-q:v", str(QUALITY), "-tag:v", "hvc1"] + colours + ["-c:a", "copy"])
+             "-q:v", str(QUALITY), "-tag:v", "hvc1"] + colours + list(audio))
 
 
 def burn_command(path, sup, info, out):
@@ -204,9 +206,13 @@ def burn_command(path, sup, info, out):
 def segment_command(path, sup, start, duration, info, out):
     """ffmpeg arguments that write `duration` seconds of the movie from `start` as MPEG-TS `out`,
     with the subtitles in PGS file `sup` (timed from start) burned in. Timestamps continue the
-    movie's own, so the TV joins segments seamlessly."""
+    movie's own, so the TV joins segments seamlessly.
+
+    Audio is encoded too: copied audio starts at the packet the input seek lands on, seconds
+    before `start`, so each segment would repeat the end of the one before. Overlapping audio
+    made the Philips TV's player stall at every segment."""
     return ([FFMPEG, "-hide_banner", "-nostdin", "-v", "error", "-y", "-hwaccel", "videotoolbox",
-             "-ss", "%.3f" % start, "-i", path, "-i", sup] + video_args(info)
+             "-ss", "%.3f" % start, "-i", path, "-i", sup] + video_args(info, SEGMENT_AUDIO)
             + ["-t", "%.3f" % duration, "-output_ts_offset", "%.3f" % (TS_BASE + start),
                "-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", out])
 

@@ -76,6 +76,13 @@ class HlsTest(unittest.TestCase):
         self.assertIn("#EXTINF:2.000,", lines)
         self.assertEqual(lines[-1], "#EXT-X-ENDLIST")
 
+    def test_segments_encode_their_audio_so_it_starts_where_the_video_does(self):
+        info = {"ten_bit": True, "primaries": "bt2020", "transfer": "smpte2084", "space": "bt2020nc"}
+        cmd = burn.segment_command("film.mp4", "s.sup", 330.0, 6.0, info, "55.ts")
+        self.assertEqual(cmd[cmd.index("-c:a") + 1], "eac3")
+        self.assertEqual(cmd[cmd.index("-output_ts_offset") + 1], "340.000")
+        self.assertIn("copy", burn.burn_command("film.mp4", "s.sup", info, "out.mp4"))  # copies keep the audio as is
+
     def session(self, encode):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
