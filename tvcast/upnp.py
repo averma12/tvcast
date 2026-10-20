@@ -150,10 +150,12 @@ def captions(tv):
     return caption_files(tag(x, "Captions"), what), caption_files(tag(x, "EnabledCaptions"), what)
 
 
-def set_subtitles(tv, on):
-    available = captions(tv)[0]
-    if not available:
-        raise RuntimeError("TV %s has no subtitle file loaded for this video" % tv["name"])
-    # Only one subtitle file is ever served, so the first entry is ours.
-    soap(tv, "RenderingControl", "X_ControlCaption", InstanceID=0,
-         Operation="Enable" if on else "Disable", **available[0])
+def set_caption(tv, on, media_url, caption_url, name):
+    """Show or hide the SubRip file at caption_url over the video playing from media_url.
+
+    A Samsung player registers only the first subtitle file sent with a video, but Enable makes it
+    fetch and draw any caption URL at once, so this also switches files mid-movie. Disable leaves
+    nothing on screen, not even tracks embedded in the video."""
+    soap(tv, "RenderingControl", "X_ControlCaption", InstanceID=0, Operation="Enable" if on else "Disable",
+         Name=name, ResourceURI="dlna" + media_url[len("http"):], CaptionURI=caption_url,
+         CaptionType="SRT", Language="", Encoding="UTF-8")

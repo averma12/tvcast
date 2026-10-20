@@ -14,11 +14,14 @@ from http.server import ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
 from . import discovery, samsung
-from .library import FFPROBE, VIDEO_TYPES, choose_folder, playability, probe, scan_library
+from .library import FFPROBE, VIDEO_TYPES, choose_folder, choose_subtitle_file, playability, probe, scan_library
 from .server import PANEL_HTML, PanelHandler, Stats, StreamHandler
 from .state import State
+from .subtitles import (
+    IMAGE_CODECS, LANGUAGE_TOKENS, SUBTITLE_TYPES, distinct_labels, embedded_label, prepare, subtitle_track,
+)
 from .upnp import (
-    DLNA_FEATURES, captions, has_caption_control, hms, log, rendering, set_subtitles, transport, transport_status,
+    DLNA_FEATURES, captions, has_caption_control, hms, log, rendering, set_caption, transport, transport_status,
     tv_status,
 )
 
@@ -80,17 +83,46 @@ def tv_list(tvs):
 class Playback:
     """One movie loaded on a TV, as last observed by the monitor."""
 
-    def __init__(self, movie, tv, base):
+    def __init__(self, movie, tv, base, subtitle):
         self.movie = movie
         self.tv = tv
+        self.base = base
         self.media_url = "%s/media/%s%s" % (base, movie.id, movie.ext)
-        self.subs_url = "%s/subs/%s.srt" % (base, movie.id) if movie.subs else None
+        self.subtitle = subtitle  # the subtitle file TV Cast shows, or None
+        self.previous_subtitle = None  # the file shown before, which "subtitles on" brings back
         self.seen_playing = False  # STOPPED before the first PLAYING is just the TV loading
         self.stopped_polls = 0
         self.position = None
         self.duration = None
         self.last_saved = 0.0
         self.unreachable_since = None
+
+    def subtitle_url(self, track):
+        return "%s/subs/%s/%s.srt" % (self.base, self.movie.id, track["id"])
+
+
+def match_track(tracks, choice):
+    """The subtitle track a user named: its id, its number in tracks (from 1), its language
+    (code or name; plain over SDH or forced), or a unique part of its label."""
+    usable = [t for t in tracks if not t["missing"]]
+    if choice.isdigit() and 1 <= int(choice) <= len(tracks):
+        if tracks[int(choice) - 1]["missing"]:
+            raise ValueError("subtitle file %s is missing" % tracks[int(choice) - 1]["path"])
+        return tracks[int(choice) - 1]
+    lang = LANGUAGE_TOKENS.get(choice.lower())
+    for matches in (
+        [t for t in usable if t["id"] == choice],
+        [t for t in usable if t["label"].lower() == choice.lower()],
+        sorted((t for t in usable if lang and t["lang"] == lang), key=lambda t: (t["commentary"], t["forced"], t["sdh"])),
+    ):
+        if matches:
+            return matches[0]
+    matches = [t for t in usable if choice.lower() in t["label"].lower()]
+    if len(matches) == 1:
+        return matches[0]
+    labels = "\n  ".join(t["label"] for t in (matches or usable)) or "(none)"
+    raise ValueError("%s subtitles %r; choose one of:\n  %s"
+                     % ("several" if matches else "no", choice, labels))
 
 
 class App:
@@ -102,6 +134,8 @@ class App:
             self.state.set("libraries", [os.path.abspath(os.path.expanduser(r)) for r in seeds])
         self.stats = Stats()
         self.remote = samsung.Remote(self.state)
+        # Subtitles converted to SubRip for the TV, next to the state file so test daemons keep their own.
+        self.subtitle_cache = os.path.join(os.path.dirname(os.path.abspath(self.state.path)), "subtitles")
         # Guards current, movies, by_id, library_problems, library_private, scanning,
         # rescan_pending, probing, the playback queue and caffeinate.
         self.lock = threading.RLock()
@@ -266,7 +300,10 @@ class App:
     def probe_info(self, movie):
         entry = self.state.probe(movie.path)
         if entry and entry.get("size") == movie.size and entry.get("mtime") == movie.mtime:
-            return entry["info"]
+            info = entry["info"]
+            # A summary without a subtitle list was saved by an older TV Cast; probe it again.
+            if "error" in info or "subtitles" in info:
+                return info
         return None
 
     def lookup(self, movie_id):
@@ -357,15 +394,182 @@ class App:
 
         Every library video stays reachable by its id, so a TV that keeps playing across a
         restart of this service never hits a 404."""
-        m = re.fullmatch(r"/(media|subs)/([0-9a-f]{12})(\.\w+)", url_path)
+        m = re.fullmatch(r"/(media|subs)/([0-9a-f]{12})(\.\w+|/(f[0-9a-f]{10})\.srt)", url_path)
         movie = m and self.lookup(m[2])
         if not movie:
             return None
         if m[1] == "media" and m[3] == movie.ext:
             return movie.path, VIDEO_TYPES[movie.ext], movie
-        if m[1] == "subs" and m[3] == ".srt" and movie.subs:
-            return movie.subs, "text/srt", None
-        return None
+        track = m[1] == "subs" and next((t for t in self.subtitle_tracks(movie) if t["id"] == m[4]), None)
+        if not track or track["missing"]:
+            return None
+        try:
+            return prepare(track["path"], self.subtitle_cache), "text/srt", None
+        except (OSError, ValueError) as e:
+            log("can't serve subtitles %s: %s" % (track["path"], e))
+            return None
+
+    # Subtitles
+
+    def subtitle_tracks(self, movie):
+        """The movie's subtitle files: those beside it in the library, then those added in TV Cast.
+        Added files that have gone missing stay listed, marked missing, so they can be removed."""
+        found = {t["path"] for t in movie.subs}
+        tracks = [dict(t, added=False, missing=False) for t in movie.subs]
+        for path in self.state.movie(movie.path).get("subtitle_files", []):
+            if path not in found:
+                tracks.append(dict(subtitle_track(path), added=True, missing=not os.path.isfile(path)))
+        distinct_labels(tracks)
+        return tracks
+
+    def has_embedded_subtitles(self, movie):
+        """Whether the video holds subtitle tracks the TV draws itself (per its last probe)."""
+        info = self.probe_info(movie) or {}
+        return any(s.get("codec") not in IMAGE_CODECS for s in info.get("subtitles", []))
+
+    def default_subtitle(self, movie, tracks, allow_off=True):
+        """The file to show when the movie starts: the one last chosen for it, which may be none;
+        else none when the video has subtitle tracks of its own, which the TV shows by itself;
+        else a file beside it named just like it, .srt first. Other files wait for the user.
+        allow_off=False skips an earlier "off" and the video's own tracks, for "subtitles on"."""
+        saved = self.state.movie(movie.path).get("subtitle")
+        usable = [t for t in tracks if not t["missing"]]
+        chosen = next((t for t in usable if t["id"] == saved), None)
+        if chosen:
+            return chosen
+        if allow_off and (saved == "off" or self.has_embedded_subtitles(movie)):
+            return None
+        folder = os.path.dirname(movie.path)
+        exact = [t for t in usable if t["exact"] and os.path.dirname(t["path"]) == folder]
+        return min(exact, key=lambda t: not t["path"].lower().endswith(".srt"), default=None)
+
+    def remember_subtitle(self, movie, track):
+        self.state.update_movie(movie.path, subtitle=track["id"] if track else "off")
+
+    def subtitle_ready(self, track):
+        """Fail with a readable error when the TV couldn't be given track."""
+        try:
+            prepare(track["path"], self.subtitle_cache)
+        except OSError as e:
+            raise ValueError("can't read subtitles %s: %s" % (track["path"], e.strerror or e))
+
+    def switch_subtitles(self, choice):
+        """Show another subtitle file on the playing movie, or none: choice is "off", "on" (the
+        file shown last, else the default) or anything match_track takes. The choice is
+        remembered for the movie. Tracks inside the video are left to the TV's own menu: Disable
+        doesn't hide them, but Enable replaces them."""
+        with self.playback_lock:
+            with self.lock:
+                pb = self.current
+            if pb is None:
+                raise ValueError("no video from this library is playing")
+            if not has_caption_control(pb.tv):
+                raise RuntimeError("TV %s can't switch subtitles from TV Cast; use its own remote" % pb.tv["name"])
+            tracks = self.subtitle_tracks(pb.movie)
+            if choice == "off":
+                track = None
+            elif choice == "on":
+                # The file shown last may have been removed since.
+                last = pb.subtitle or pb.previous_subtitle
+                track = next((t for t in tracks if last and t["id"] == last["id"] and not t["missing"]), None)
+                track = track or self.default_subtitle(pb.movie, tracks, allow_off=False)
+                if track is None and not tracks:
+                    raise ValueError("%s has no subtitle files; add one" % pb.movie.title)
+                if track is None:
+                    raise ValueError("choose which subtitles to show:\n  %s" % "\n  ".join(t["label"] for t in tracks))
+            else:
+                track = match_track(tracks, choice)
+            if track is None:
+                if pb.subtitle is not None:
+                    set_caption(pb.tv, False, pb.media_url, pb.subtitle_url(pb.subtitle), pb.movie.title)
+            else:
+                self.subtitle_ready(track)
+                set_caption(pb.tv, True, pb.media_url, pb.subtitle_url(track), pb.movie.title)
+            pb.previous_subtitle = pb.subtitle or pb.previous_subtitle
+            pb.subtitle = track
+            self.remember_subtitle(pb.movie, track)
+
+    def subtitle_movie(self, body):
+        """The movie a subtitle request names by id, or the playing one."""
+        if body.get("id"):
+            movie = self.lookup(str(body["id"]))
+            if movie is None:
+                raise ValueError("no video with id %r in the library" % body["id"])
+            return movie
+        with self.lock:
+            pb = self.current
+        if pb is None:
+            raise ValueError("no video from this library is playing; name one")
+        return pb.movie
+
+    def add_subtitles(self, body):
+        """Attach a subtitle file from anywhere on this Mac to a movie and show it. Without a path,
+        the native file picker asks for one."""
+        movie = self.subtitle_movie(body)
+        path = body.get("path")
+        if path is None:
+            path = choose_subtitle_file(os.path.dirname(movie.path))
+            if path is None:
+                return {"cancelled": True}
+        path = os.path.abspath(os.path.expanduser(str(path)))
+        if os.path.splitext(path)[1].lower() not in SUBTITLE_TYPES:
+            raise ValueError("%s is not a subtitle file; use .srt, .ass, .ssa or .vtt" % path)
+        if not os.path.isfile(path):
+            raise ValueError("no subtitle file at %s" % path)
+        self.subtitle_ready({"path": path})
+        files = self.state.movie(movie.path).get("subtitle_files", [])
+        if path not in files and path not in {t["path"] for t in movie.subs}:
+            self.state.update_movie(movie.path, subtitle_files=files + [path])
+        track = next(t for t in self.subtitle_tracks(movie) if t["path"] == path)
+        log("subtitles %s added to %s" % (path, movie.title))
+        with self.lock:
+            pb = self.current
+        if pb is not None and pb.movie.id == movie.id and has_caption_control(pb.tv):
+            self.switch_subtitles(track["id"])
+        else:
+            self.remember_subtitle(movie, track)
+        return {"track": track["id"], "label": track["label"]}
+
+    def remove_subtitles(self, body):
+        """Detach a subtitle file added in TV Cast; files beside the video stay."""
+        movie = self.subtitle_movie(body)
+        track = next((t for t in self.subtitle_tracks(movie) if t["id"] == str(body["track"])), None)
+        if track is None or not track["added"]:
+            raise ValueError("only subtitle files added in TV Cast can be removed")
+        saved = self.state.movie(movie.path)
+        with self.lock:
+            pb = self.current
+        if pb is not None and pb.movie.id == movie.id and pb.subtitle and pb.subtitle["id"] == track["id"]:
+            self.switch_subtitles("off")
+        # A choice of the removed file falls back to the default rules rather than to "off".
+        self.state.update_movie(
+            movie.path,
+            subtitle_files=[p for p in saved.get("subtitle_files", []) if p != track["path"]],
+            subtitle=None if saved.get("subtitle") == track["id"] else saved.get("subtitle"),
+        )
+
+    def subtitle_status(self, pb):
+        info = self.probe_info(pb.movie) or {}
+        return {
+            "control": has_caption_control(pb.tv),
+            "selected": pb.subtitle["id"] if pb.subtitle else None,
+            "tracks": [
+                {k: t[k] for k in ("id", "label", "lang", "added", "missing")}
+                for t in self.subtitle_tracks(pb.movie)
+            ],
+            "embedded": [
+                {"label": embedded_label(s), "image": s.get("codec") in IMAGE_CODECS}
+                for s in info.get("subtitles", [])
+            ],
+        }
+
+    def caption_url(self, movie):
+        """The subtitle URL for the CaptionInfo.sec header on movie's stream, or None."""
+        with self.lock:
+            pb = self.current
+        if pb is None or pb.movie.id != movie.id or pb.subtitle is None:
+            return None
+        return pb.subtitle_url(pb.subtitle)
 
     # Playback
 
@@ -379,11 +583,11 @@ class App:
                 self.caffeinate.wait()
                 self.caffeinate = None
 
-    def open_movie(self, movie_id, from_start=False):
+    def open_movie(self, movie_id, from_start=False, subtitle=None):
         with self.playback_lock:
-            self._open_movie(movie_id, from_start)
+            self._open_movie(movie_id, from_start, subtitle)
 
-    def _open_movie(self, movie_id, from_start):
+    def _open_movie(self, movie_id, from_start, subtitle):
         movie = self.lookup(movie_id)
         if movie is None or movie.root not in self.state.get("libraries"):
             raise ValueError("no video with id %r in the library" % movie_id)
@@ -393,7 +597,21 @@ class App:
         start = None if from_start else self.state.movie(movie.path).get("position", 0)
         if start is not None and start < RESUME_MIN:
             start = None
-        pb = Playback(movie, tv, "http://%s:%d" % (lan_ip_towards(tv["ip"]), self.port))
+        tracks = self.subtitle_tracks(movie)
+        if subtitle is not None:  # named by the user: a problem with it is an error
+            track = None if subtitle == "off" else match_track(tracks, subtitle)
+            if track:
+                self.subtitle_ready(track)
+            self.remember_subtitle(movie, track)
+        else:  # picked by the rules: a broken file must not keep the movie from playing
+            track = self.default_subtitle(movie, tracks)
+            try:
+                if track:
+                    self.subtitle_ready(track)
+            except ValueError as e:
+                log("warning: playing %s without subtitles: %s" % (movie.title, e))
+                track = None
+        pb = Playback(movie, tv, "http://%s:%d" % (lan_ip_towards(tv["ip"]), self.port), track)
         with self.lock:
             if self.state.get("tv") != tv["id"]:
                 raise RuntimeError("another TV was selected while opening %s; open it again" % movie.title)
@@ -414,12 +632,14 @@ class App:
 
     def load(self, pb, start):
         sub_xml = ""
-        if pb.subs_url:
+        if pb.subtitle:
             # The sec: tags are Samsung's way to attach external subtitles; other TVs ignore them.
+            # A Samsung player registers only the first file, so only the chosen track goes out;
+            # set_caption switches to others later.
             sub_xml = (
                 '<res protocolInfo="http-get:*:text/srt:*">%s</res>'
                 '<sec:CaptionInfoEx sec:type="srt">%s</sec:CaptionInfoEx>'
-                '<sec:CaptionInfo sec:type="srt">%s</sec:CaptionInfo>' % ((pb.subs_url,) * 3)
+                '<sec:CaptionInfo sec:type="srt">%s</sec:CaptionInfo>' % ((pb.subtitle_url(pb.subtitle),) * 3)
             )
         title = pb.movie.title + (" (%d)" % pb.movie.year if pb.movie.year else "")
         didl = (
@@ -437,10 +657,10 @@ class App:
         self.when_ready(pb.tv, "Play", Speed=1)
         if start is not None:
             self.when_ready(pb.tv, "Seek", Unit="REL_TIME", Target=hms(start))
-        if pb.subs_url and has_caption_control(pb.tv):
+        if pb.subtitle and has_caption_control(pb.tv):
             try:
-                self.enable_subtitles_on_load(pb.tv)
-            except RuntimeError as e:  # the movie plays anyway; the panel can still try Subtitles: On
+                self.enable_subtitles_on_load(pb)
+            except RuntimeError as e:  # the movie plays anyway; the panel can still switch them on
                 log("warning: couldn't switch on subtitles: %s" % e)
 
     def when_ready(self, tv, action, **args):
@@ -455,16 +675,14 @@ class App:
                     raise
             time.sleep(0.5)
 
-    def enable_subtitles_on_load(self, tv):
+    def enable_subtitles_on_load(self, pb):
         # The player can list subtitles as enabled without drawing them (seen after a
-        # restart-and-seek), so send an explicit Enable once it has parsed the file.
+        # restart-and-seek), so send an explicit Enable once it has parsed the file. Enable works
+        # even for a file the player never listed, so a slow listing only delays it.
         deadline = time.time() + 15
-        while not captions(tv)[0]:
-            if time.time() > deadline:
-                log("warning: TV %s never reported the subtitle file; use Subtitles: On in the panel" % tv["name"])
-                return
+        while not captions(pb.tv)[0] and time.time() < deadline:
             time.sleep(0.5)
-        set_subtitles(tv, True)
+        set_caption(pb.tv, True, pb.media_url, pb.subtitle_url(pb.subtitle), pb.movie.title)
 
     def monitor(self):
         last_idle_poll = 0.0
@@ -495,7 +713,8 @@ class App:
         movie = m and self.lookup(m[2])
         if not movie or s["state"] not in ("PLAYING", "PAUSED_PLAYBACK"):
             return
-        pb = Playback(movie, tv, m[1])
+        # The TV doesn't say which subtitle file it shows; the movie's remembered choice is the best guess.
+        pb = Playback(movie, tv, m[1], self.default_subtitle(movie, self.subtitle_tracks(movie)))
         pb.seen_playing = True
         with self.playback_lock, self.lock:
             # Another TV may have been selected while this one was being asked.
@@ -572,12 +791,15 @@ class App:
         info = self.probe_info(movie)
         with self.lock:
             checking = movie.path in self.probing
+        tracks = self.subtitle_tracks(movie)
+        embedded = (info or {}).get("subtitles", [])
+        languages = {t["lang"] for t in tracks} | {LANGUAGE_TOKENS.get((s.get("lang") or "").lower()) for s in embedded}
         return {
             "id": movie.id,
             "group": movie.group,
             "title": movie.title,
             "year": movie.year,
-            "subs": bool(movie.subs),
+            "subs": {"count": len(tracks) + len(embedded), "languages": sorted(languages - {None})},
             "position": saved.get("position", 0),
             "duration": saved.get("duration") or (info or {}).get("duration"),
             "watched": saved.get("watched", False),
@@ -602,7 +824,7 @@ class App:
         out = {
             "now": None if pb is None else {
                 "id": pb.movie.id, "title": pb.movie.title, "year": pb.movie.year,
-                "file": os.path.basename(pb.movie.path),
+                "file": os.path.basename(pb.movie.path), "subtitles": self.subtitle_status(pb),
             },
             "queue": [dict(item, available=item["id"] in available) for item in queued],
             "queue_error": queue_error,
@@ -630,10 +852,10 @@ class App:
         except RuntimeError as e:
             out["tv_error"] = str(e)
             return out
-        # None unless a Samsung TV plays a video with subtitles from this library and reports
-        # them; a failing vendor extension must not make the TV look unreachable.
+        # None unless a Samsung TV plays a video from this library with a subtitle file shown by
+        # TV Cast and reports it; a failing vendor extension must not make the TV look unreachable.
         st["subtitles"] = None
-        if pb is not None and pb.subs_url and has_caption_control(tv):
+        if pb is not None and pb.subtitle and has_caption_control(tv):
             with contextlib.suppress(RuntimeError):
                 available, enabled = captions(tv)
                 # None when the player has no subtitle file; the reported on/off can be stale.
@@ -643,7 +865,9 @@ class App:
 
     def control(self, action, body):
         if action == "open":
-            self.open_movie(str(body["id"]), from_start=bool(body.get("from_start")))
+            subtitle = body.get("subtitle")
+            self.open_movie(str(body["id"]), from_start=bool(body.get("from_start")),
+                            subtitle=None if subtitle is None else str(subtitle))
         elif action == "stop":
             with self.playback_lock:
                 tv = self.require_tv()
@@ -667,14 +891,11 @@ class App:
         elif action == "mute":
             rendering(self.require_tv(), "SetMute", DesiredMute=1 if body["on"] else 0)
         elif action == "subtitles":
-            with self.lock:
-                pb = self.current
-            # Without this check the command would toggle subtitles on media from other apps.
-            if pb is None or not pb.subs_url:
-                raise ValueError("no video with subtitles is playing from this library")
-            if not has_caption_control(pb.tv):
-                raise RuntimeError("TV %s can't switch subtitles from TV Cast; use its own remote" % pb.tv["name"])
-            set_subtitles(pb.tv, bool(body["on"]))
+            self.switch_subtitles(str(body["track"]))
+        elif action == "add_subtitles":
+            return self.add_subtitles(body)
+        elif action == "remove_subtitles":
+            self.remove_subtitles(body)
         elif action == "add_folder":
             return self.add_folder()
         elif action == "remove_folder":

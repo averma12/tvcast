@@ -112,10 +112,11 @@ class StreamHandler(BaseHTTPRequestHandler):
         if movie is not None:
             self.send_header("transferMode.dlna.org", "Streaming")
             self.send_header("contentFeatures.dlna.org", DLNA_FEATURES)
-            if movie.subs:
-                # Samsung-specific header that points the player at external subtitles;
-                # other TVs ignore it.
-                self.send_header("CaptionInfo.sec", "http://%s/subs/%s.srt" % (self.headers.get("Host"), movie.id))
+            caption = self.app.caption_url(movie)
+            if caption:
+                # Samsung-specific header that points the player at external subtitles; Samsung
+                # asks for it with getcaptionInfo.sec, other TVs ignore it.
+                self.send_header("CaptionInfo.sec", caption)
         self.end_headers()
         if not send_body:
             return

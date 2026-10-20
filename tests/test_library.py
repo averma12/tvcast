@@ -1,8 +1,13 @@
+import json
 import os
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
-from tvcast.library import Movie, pick_subtitles, scan_library
+from tvcast import library
+from tvcast.library import Movie, probe, scan_library
+from tvcast.subtitles import find_subtitles
 
 
 def touch(*parts):
@@ -21,7 +26,7 @@ class LibraryTest(unittest.TestCase):
 
 class MovieTest(LibraryTest):
     def movie(self, *parts, alone=True):
-        return Movie(self.root, touch(self.root, *parts), None, alone)
+        return Movie(self.root, touch(self.root, *parts), [], alone)
 
     def test_dotted_release_name(self):
         m = self.movie("Some.Movie.2001.1080p.BluRay.x264.mkv")
@@ -48,34 +53,54 @@ class MovieTest(LibraryTest):
         self.assertEqual((m.title, m.group), ("Part One", os.path.join(self.root, "Some Saga")))
 
 
-class PickSubtitlesTest(LibraryTest):
-    def pick(self, video_stem, alone):
+class FindSubtitlesTest(LibraryTest):
+    def find(self, video_stem, siblings=()):
         names = os.listdir(self.root)
         files = [n for n in names if os.path.isfile(os.path.join(self.root, n))]
         dirs = [n for n in names if os.path.isdir(os.path.join(self.root, n))]
-        return pick_subtitles(self.root, files, dirs, video_stem, alone)
+        tracks = find_subtitles(self.root, files, dirs, video_stem, siblings)
+        return [(os.path.relpath(t["path"], self.root), t["label"]) for t in tracks]
 
-    def test_same_stem_wins_even_beside_other_videos(self):
-        touch(self.root, "Film.srt")
-        touch(self.root, "Other.srt")
-        self.assertEqual(self.pick("Film", alone=False), os.path.join(self.root, "Film.srt"))
+    def test_files_named_like_the_video_in_every_language_and_format(self):
+        for name in ("Film.srt", "Film.en.forced.srt", "Film.en.hi.SRT", "Film.fr.ass", "Film_hi.vtt", "Other.srt"):
+            touch(self.root, name)
+        self.assertEqual(self.find("Film", siblings=["Other"]), [
+            ("Film.en.forced.srt", "English Forced"), ("Film.en.hi.SRT", "English SDH"),
+            ("Film.srt", "Film.srt"), ("Film.fr.ass", "French"), ("Film_hi.vtt", "Hindi"),
+        ])
 
-    def test_unmatched_srt_only_for_a_video_alone(self):
-        srt = touch(self.root, "subtitles.en.srt")
-        self.assertEqual(self.pick("Film", alone=True), srt)
-        self.assertIsNone(self.pick("Film", alone=False))
+    def test_a_longer_video_name_owns_its_files(self):
+        touch(self.root, "Film.en.srt")
+        touch(self.root, "Film.2.en.srt")
+        touch(self.root, "Film 3.srt")
+        self.assertEqual(self.find("Film", siblings=["Film.2", "Film 3"]), [("Film.en.srt", "English")])
+        self.assertEqual(self.find("Film.2", siblings=["Film", "Film 3"]), [("Film.2.en.srt", "English")])
 
-    def test_english_in_subs_folder_prefers_plain_over_sdh(self):
+    def test_unmatched_files_only_for_a_video_alone(self):
+        touch(self.root, "subtitles.en.srt")
+        self.assertEqual(self.find("Film"), [("subtitles.en.srt", "English")])
+        self.assertEqual(self.find("Film", siblings=["Other"]), [])
+
+    def test_subs_folder_lists_every_language(self):
         touch(self.root, "Subs", "2_English_SDH.srt")
-        plain = touch(self.root, "Subs", "3_English.srt")
+        touch(self.root, "Subs", "3_English.srt")
         touch(self.root, "Subs", "4_French.srt")
-        self.assertEqual(self.pick("Film", alone=True), plain)
-
-    def test_never_commentary(self):
         touch(self.root, "Subs", "5_English_Commentary.srt")
-        self.assertIsNone(self.pick("Film", alone=True))
-        sdh = touch(self.root, "Subs", "2_English_SDH.srt")
-        self.assertEqual(self.pick("Film", alone=True), sdh)
+        touch(self.root, "Subs", ".hidden.srt")
+        self.assertEqual([label for _, label in self.find("Film")],
+                         ["English", "English SDH", "French", "English Commentary"])
+
+    def test_episode_folder_in_subs_belongs_to_its_episode(self):
+        touch(self.root, "Subs", "Show.S01E01", "2_English.srt")
+        touch(self.root, "Subs", "Show.S01E02", "2_English.srt")
+        self.assertEqual(self.find("Show.S01E01", siblings=["Show.S01E02"]),
+                         [(os.path.join("Subs", "Show.S01E01", "2_English.srt"), "English")])
+
+    def test_shared_labels_name_their_files(self):
+        touch(self.root, "Film.pt.srt")
+        touch(self.root, "Film.pt-BR.srt")
+        self.assertEqual([label for _, label in self.find("Film")],
+                         ["Portuguese (Film.pt-BR.srt)", "Portuguese (Film.pt.srt)"])
 
 
 class ScanLibraryTest(LibraryTest):
@@ -104,6 +129,22 @@ class ScanLibraryTest(LibraryTest):
         movies, problems, _ = scan_library([missing])
         self.assertEqual(movies, [])
         self.assertEqual(problems, {missing: ["folder not found (unmounted drive?)"]})
+
+
+class ProbeTest(unittest.TestCase):
+    def test_subtitle_streams_are_listed_with_language_and_flags(self):
+        out = json.dumps({"streams": [
+            {"codec_type": "video", "codec_name": "h264"},
+            {"codec_type": "subtitle", "codec_name": "subrip", "tags": {"language": "eng"},
+             "disposition": {"forced": 0, "hearing_impaired": 1}},
+            {"codec_type": "subtitle", "codec_name": "hdmv_pgs_subtitle"},
+        ], "format": {"duration": "60.0"}})
+        with mock.patch.object(library.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, out, "")):
+            info = probe("/videos/film.mkv")
+        self.assertEqual(info["subtitles"], [
+            {"codec": "subrip", "lang": "eng", "title": None, "forced": False, "sdh": True},
+            {"codec": "hdmv_pgs_subtitle", "lang": None, "title": None, "forced": False, "sdh": False},
+        ])
 
 
 if __name__ == "__main__":

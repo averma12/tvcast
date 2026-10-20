@@ -10,6 +10,8 @@ Log: `~/Library/Logs/tvcast.log` · Settings and resume points: `~/Library/Appli
 | "macOS blocks this service from reading it" | Move the videos out of Documents, Desktop, Downloads or external drives, e.g. into `~/Movies`. |
 | Video plays without sound | The audio is DTS or TrueHD. See [Videos the TV can't play](library.md#videos-the-tv-cant-play). |
 | Subtitles don't show (Samsung) | `tv subs on` again; the TV sometimes says they're on without drawing them. |
+| A subtitle file isn't listed | Check its name and place against [Subtitles](library.md#subtitles), or add it with **Add file…** or `tv subs --add FILE`. |
+| Subtitles inside the video don't show | Choose them in the TV's own subtitle menu. Blu-ray image subtitles (PGS) may not show at all; see [Subtitles](library.md#subtitles). |
 | Remote "refused" | On the TV: **Settings → General → External Device Manager → Device Connection Manager → Device List**, allow TV Cast, then pair again. |
 | App did not confirm it opened | Check the TV for a prompt, then try again. **Refresh** under Apps checks the supported installed apps; an app running in the background is not shown as open. |
 | "Different certificate than when paired" | The TV was reset or updated. Pair again. |

@@ -1,4 +1,4 @@
-"""The video library: finding videos and their subtitles in folders, and checking their codecs."""
+"""The video library: finding videos in folders, and checking their codecs and subtitle tracks."""
 import errno
 import hashlib
 import json
@@ -6,6 +6,8 @@ import os
 import re
 import shutil
 import subprocess
+
+from .subtitles import find_subtitles
 
 # Video files the library picks up, with the MIME type announced to the TV. MP4 and Matroska
 # (HEVC video, AAC audio) are verified on a 2021 Samsung Tizen TV; Matroska goes out as
@@ -27,9 +29,7 @@ EXTRAS_DIRS = {
     "featurettes", "extras", "bonus", "bonus features", "special features", "behind the scenes",
     "deleted scenes", "trailers", "interviews", "other", "subs", "subtitles",
 }
-SUBTITLE_DIRS = {"subs", "subtitles"}
 SAMPLE = re.compile(r"(^|[\W_])samples?([\W_]|$)", re.I)  # release "sample" clips and folders
-ENGLISH = re.compile(r"(^|[\W_])eng(lish)?([\W_]|$)", re.I)
 FFPROBE = shutil.which("ffprobe", path=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin")
 
 
@@ -63,27 +63,6 @@ class Movie:
         if year:
             name = name[:year.start()]
         self.title = re.sub(r"\s+", " ", re.sub(r"\[[^\]]*\]", "", name)).strip(" -([") or os.path.basename(path)
-
-
-def pick_subtitles(dirpath, filenames, subdirs, video_stem, alone):
-    """The .srt to serve with a video: one named like it; for a video alone in its folder,
-    a lone .srt beside it or an English one in a Subs folder (plain over SDH, never commentary)."""
-    srts = sorted(f for f in filenames if f.lower().endswith(".srt") and not f.startswith("."))
-    if video_stem + ".srt" in srts:
-        return os.path.join(dirpath, video_stem + ".srt")
-    if not alone:
-        return None
-    if len(srts) == 1:
-        return os.path.join(dirpath, srts[0])
-    english = []
-    for d in subdirs:
-        if d.lower() in SUBTITLE_DIRS:
-            folder = os.path.join(dirpath, d)
-            english += [
-                os.path.join(folder, f) for f in sorted(os.listdir(folder))
-                if f.lower().endswith(".srt") and ENGLISH.search(f) and "commentary" not in f.lower()
-            ]
-    return min(english, key=lambda p: (bool(re.search(r"sdh|forced", os.path.basename(p), re.I)), len(p)), default=None)
 
 
 def scan_library(roots):
@@ -124,7 +103,8 @@ def scan_library(roots):
             ]
             for name in videos:
                 try:
-                    subs = pick_subtitles(dirpath, filenames, subdirs, os.path.splitext(name)[0], len(videos) == 1)
+                    siblings = [os.path.splitext(v)[0] for v in videos if v != name]
+                    subs = find_subtitles(dirpath, filenames, subdirs, os.path.splitext(name)[0], siblings)
                     found.append(Movie(root, os.path.join(dirpath, name), subs, len(videos) == 1))
                 except OSError as e:
                     issues.append(str(e))
@@ -138,7 +118,9 @@ def probe(path):
     """Codec summary of a video from ffprobe; {"error": ...} when it can't be read."""
     try:
         r = subprocess.run(
-            [FFPROBE, "-v", "error", "-show_entries", "stream=codec_type,codec_name:format=duration", "-of", "json", path],
+            [FFPROBE, "-v", "error", "-show_entries",
+             "stream=codec_type,codec_name:stream_tags=language,title:stream_disposition=forced,hearing_impaired"
+             ":format=duration", "-of", "json", path],
             capture_output=True, text=True, timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -151,6 +133,16 @@ def probe(path):
     return {
         "video": [s["codec_name"] for s in streams if s.get("codec_type") == "video" and s.get("codec_name")],
         "audio": [s["codec_name"] for s in streams if s.get("codec_type") == "audio" and s.get("codec_name")],
+        "subtitles": [
+            {
+                "codec": s.get("codec_name"),
+                "lang": (s.get("tags") or {}).get("language"),
+                "title": (s.get("tags") or {}).get("title"),
+                "forced": bool((s.get("disposition") or {}).get("forced")),
+                "sdh": bool((s.get("disposition") or {}).get("hearing_impaired")),
+            }
+            for s in streams if s.get("codec_type") == "subtitle"
+        ],
         "duration": float(duration) if duration else None,
     }
 
@@ -171,18 +163,31 @@ def playability(info):
     return None
 
 
-def choose_folder():
-    """Show the native folder picker on this Mac; None when the user cancels."""
+def choose(what, dialog):
+    """Run an AppleScript "choose …" dialog on this Mac and return the chosen POSIX path; None
+    when the user cancels. what names the picker in errors."""
     r = subprocess.run(
-        ["/usr/bin/osascript",
-         # Without activate the dialog can open behind the browser.
-         "-e", "activate",
-         "-e", 'POSIX path of (choose folder with prompt "Choose a folder with videos for TV Cast"'
-               ' default location (path to movies folder))'],
+        # Without activate the dialog can open behind the browser.
+        ["/usr/bin/osascript", "-e", "activate", "-e", "POSIX path of (%s)" % dialog],
         capture_output=True, text=True,
     )
     if r.returncode != 0:
         if "(-128)" in r.stderr:  # AppleScript's "User canceled."
             return None
-        raise RuntimeError("folder picker failed: %s" % r.stderr.strip())
-    return r.stdout.strip().rstrip("/") or "/"
+        raise RuntimeError("%s picker failed: %s" % (what, r.stderr.strip()))
+    return r.stdout.strip()
+
+
+def choose_folder():
+    """Show the native folder picker on this Mac; None when the user cancels."""
+    path = choose("folder", 'choose folder with prompt "Choose a folder with videos for TV Cast"'
+                            " default location (path to movies folder)")
+    return None if path is None else path.rstrip("/") or "/"
+
+
+def choose_subtitle_file(folder):
+    """Show the native file picker for a subtitle file, opening in folder; None when the user cancels."""
+    # In an AppleScript string literal only backslash and double quote need escaping.
+    start = folder.replace("\\", "\\\\").replace('"', '\\"')
+    return choose("subtitle file", 'choose file with prompt "Choose a subtitle file (.srt, .ass, .ssa or .vtt)"'
+                                   ' default location (POSIX file "%s")' % start)
