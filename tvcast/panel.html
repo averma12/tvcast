@@ -271,6 +271,8 @@ SOFTWARE.
           <output id="volnum" for="volume">—</output>
         </div>
       </div>
+      <div class="row" id="submodeRow" hidden><label class="caption" for="submode">Subtitles on this TV</label><span class="select-wrap"><select id="submode"><option value="auto">Auto</option><option value="file">As a file</option><option value="burn">Burned in</option></select></span></div>
+      <p class="note" id="submodeNote"></p>
       <div id="pairing" hidden><p class="note" id="pairNote"></p><button id="pair" class="primary" hidden>Pair with TV</button></div>
       <div id="remoteControls" hidden>
         <div class="dpad" role="group" aria-label="Navigation">
@@ -309,6 +311,7 @@ SOFTWARE.
         <div class="times"><span id="pos"></span><span id="left"></span></div>
         <div class="controls"><button data-skip="-30">−30s</button><button data-skip="-10">−10s</button><button class="primary" id="toggle" disabled>Play</button><button data-skip="10">+10s</button><button data-skip="30">+30s</button><button id="stop" disabled>Stop</button></div>
         <div class="subtitles" id="subctl" hidden><label for="subsel">Subtitles</label><span class="select-wrap"><select id="subsel"></select></span><button id="subAdd">Add file…</button><button id="subRemove" class="link-button" hidden>Remove</button></div>
+        <div class="subtitles" id="burnctl" hidden><span id="burnlabel"></span><button id="makeCopy">Make copy</button><button id="deleteCopy" class="link-button">Delete copy</button></div>
         <p class="note" id="subnote"></p>
         <p class="note" id="upnext"></p>
       </section>
@@ -364,7 +367,7 @@ const show = (id, text, info = false) => { $(id).textContent = text || ''; $(id)
 const canControl = () => online && !selecting && !!st?.selected;
 // Samsung's remote endpoints can remain reachable when UPnP playback status fails.
 const canUseRemote = () => canControl() && st.remote.available && st.remote.paired;
-const ownsPlayback = () => canControl() && st.now && st.tv?.uri?.includes('/media/' + st.now.id);
+const ownsPlayback = () => canControl() && st.now && ['/media/', '/burned/', '/hls/'].some(p => st.tv?.uri?.includes(p + st.now.id));
 const appsFresh = () => canUseRemote() && !!appsAt && Date.now() - appsAt < 30000;
 
 async function request(url, options = {}, timeout = 120000) {
@@ -429,6 +432,8 @@ function renderStatus() {
   }
   $('toggle').textContent = ours && tv.state === 'PLAYING' ? 'Pause' : 'Play';
   renderSubtitles(ours ? st.now.subtitles : null);
+  renderBurn(ours ? st.now : null);
+  renderSubtitleMode();
   const next = st.queue[0];
   $('upnext').textContent = next ? 'Up next: ' + next.title : '';
   show('msg', errors.msg || (st.now && st.tv_error));
@@ -456,6 +461,30 @@ function renderSubtitles(subs) {
     `<option value="${esc(t.id)}" ${t.missing ? 'disabled' : ''}>${esc(t.label + (t.added ? (t.missing ? ' (added, missing)' : ' (added)') : ''))}</option>`).join('');
   $('subsel').value = value;
 }
+// TVs whose players show no subtitle files get them burned into the picture: HLS segments encoded
+// as the TV plays, or a finished copy made once. Copies stay until deleted here or with tv burn --delete.
+function renderBurn(now) {
+  const drawn = now?.subtitles.drawn;
+  const job = now && st.burns.find(j => j.id === now.id);
+  const copy = now && st.copies.filter(c => c.id === now.id).reduce((n, c) => n + c.size, 0);
+  $('burnctl').hidden = !drawn && !job?.running;
+  if ($('burnctl').hidden) return;
+  $('burnlabel').textContent = (drawn === 'copy' ? 'Burned in · Copy' : drawn === 'hls' ? 'Burned in · HLS (encoded as it plays)' : 'Burned in')
+    + (job?.running ? ` · Making copy ${Math.round(job.progress * 100)}%${job.eta ? ', ' + job.eta : ''}` : job?.error ? ' · Copy failed: ' + job.error : copy ? ` · Copy ready (${size(copy)})` : '');
+  $('makeCopy').hidden = !!copy || !!job?.running;
+  $('deleteCopy').hidden = !copy;
+  $('deleteCopy').disabled = drawn === 'copy';
+  $('deleteCopy').title = drawn === 'copy' ? 'Stop playback to delete the copy it is playing' : '';
+}
+function renderSubtitleMode() {
+  const tv = st.tvs.find(t => t.id === st.selected);
+  $('submodeRow').hidden = !tv;
+  if (!tv) return;
+  if (document.activeElement !== $('submode')) $('submode').value = tv.subtitle_mode;
+  $('submodeNote').textContent = tv.subtitles === 'burn'
+    ? (tv.subtitle_mode === 'auto' ? 'This TV shows no subtitle files, so TV Cast burns them into the picture.' : 'Subtitles are burned into the picture.')
+    : (tv.subtitle_mode === 'auto' ? 'Subtitle files go to the TV, which draws them.' : '');
+}
 function showTimes(pos, dur) {
   $('pos').textContent = pos == null ? '' : `${clock(pos)} / ${clock(dur)}`;
   $('left').textContent = dur ? `${clock(dur - (pos || 0))} left` : '';
@@ -464,7 +493,7 @@ function showTimes(pos, dur) {
 function movieRow(m) {
   const current = st.now?.id === m.id;
   const partial = m.position >= RESUME_MIN;
-  const meta = [m.year, runtime(m.duration), m.subs.count ? ['Subtitles', ...m.subs.languages.map(l => l.toUpperCase())].join(' ') : '', !current && partial ? `Resume at ${clock(m.position)}` : m.watched ? 'Watched' : ''];
+  const meta = [m.year, runtime(m.duration), m.subs.count ? ['Subtitles', ...m.subs.languages.map(l => l.toUpperCase())].join(' ') : '', m.copy ? 'Copy ready' : '', !current && partial ? `Resume at ${clock(m.position)}` : m.watched ? 'Watched' : ''];
   const queued = st.queue.some(item => item.id === m.id);
   const tag = current ? 'Casting' : '';
   let actions = '';
@@ -648,6 +677,9 @@ $('stop').onclick = () => act('stop');
 document.querySelectorAll('[data-skip]').forEach(b => { b.setAttribute('aria-label', `${+b.dataset.skip < 0 ? 'Back' : 'Forward'} ${Math.abs(+b.dataset.skip)} seconds`); b.onclick = () => skip(+b.dataset.skip); });
 // Re-send Enable even when captions report on: Samsung can report them without drawing them.
 $('subsel').onchange = e => act('subtitles', {track:e.target.value});
+$('makeCopy').onclick = () => act('burn', {id:st.now.id});
+$('deleteCopy').onclick = () => { if (confirm('Delete the copy with burned-in subtitles? The movie itself stays.')) act('delete_copy', {id:st.now.id}); };
+$('submode').onchange = e => act('subtitle_mode', {mode:e.target.value});
 $('subAdd').onclick = async () => { choosingSubs = true; renderStatus(); await act('add_subtitles'); choosingSubs = false; renderStatus(); };
 $('subRemove').onclick = () => act('remove_subtitles', {track:$('subsel').value});
 $('search').oninput = $('filter').onchange = renderLibrary;

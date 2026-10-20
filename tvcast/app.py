@@ -7,13 +7,14 @@ import queue
 import re
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import traceback
 from http.server import ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
-from . import discovery, samsung
+from . import burn, discovery, samsung
 from .library import FFPROBE, VIDEO_TYPES, choose_folder, choose_subtitle_file, playability, probe, scan_library
 from .server import PANEL_HTML, PanelHandler, Stats, StreamHandler
 from .state import State
@@ -76,10 +77,27 @@ def video_type(movie, tv):
     return "video/x-mkv" if movie.ext == ".mkv" and is_samsung(tv) else VIDEO_TYPES[movie.ext]
 
 
+# Renderers whose players ignore subtitle files in every form DLNA offers, and the subtitle
+# tracks inside videos too (tested on a Philips Smart 4 Google TV, model "Skyworth Media Renderer").
+# Their subtitles are burned into the picture instead.
+BURN_MANUFACTURERS = ("Skyworth",)
+SUBTITLE_MODES = ("auto", "file", "burn")
+
+
+def subtitle_mode(tv):
+    """How tv shows subtitle files: "file" sends the file alongside the video for the TV's player
+    to draw; "burn" draws it into the picture. A mode saved for the TV wins over the default."""
+    mode = tv.get("subtitle_mode", "auto")
+    if mode in ("file", "burn"):
+        return mode
+    return "burn" if any(m in tv.get("manufacturer", "") for m in BURN_MANUFACTURERS) else "file"
+
+
 def tv_list(tvs):
     """TV records as the panel lists them, sorted by name."""
     return [
-        {"id": tv["id"], "name": tv["name"], "model": tv.get("model", ""), "ip": tv["ip"], "remote": bool(tv.get("remote"))}
+        {"id": tv["id"], "name": tv["name"], "model": tv.get("model", ""), "ip": tv["ip"], "remote": bool(tv.get("remote")),
+         "subtitle_mode": tv.get("subtitle_mode", "auto"), "subtitles": subtitle_mode(tv)}
         for tv in sorted(tvs, key=lambda tv: (tv["name"].lower(), tv["id"]))
     ]
 
@@ -87,12 +105,22 @@ def tv_list(tvs):
 class Playback:
     """One movie loaded on a TV, as last observed by the monitor."""
 
-    def __init__(self, movie, tv, base, subtitle):
+    def __init__(self, movie, tv, base, subtitle, hls=False, burned=None):
         self.movie = movie
         self.tv = tv
         self.base = base
-        self.media_url = "%s/media/%s%s" % (base, movie.id, movie.ext)
         self.subtitle = subtitle  # the subtitle file TV Cast shows, or None
+        # With subtitles burned in (subtitle_mode "burn"), the TV plays either HLS segments
+        # encoded as it asks for them, or a finished burned-in copy (path) like any file.
+        self.hls = hls
+        self.burned = burned
+        self.size = os.path.getsize(burned) if burned else movie.size
+        if hls:
+            self.media_url = "%s/hls/%s/%s/index.m3u8" % (base, movie.id, subtitle["id"])
+        elif burned:
+            self.media_url = "%s/burned/%s/%s.mp4" % (base, movie.id, subtitle["id"])
+        else:
+            self.media_url = "%s/media/%s%s" % (base, movie.id, movie.ext)
         self.previous_subtitle = None  # the file shown before, which "subtitles on" brings back
         self.seen_playing = False  # STOPPED before the first PLAYING is just the TV loading
         self.stopped_polls = 0
@@ -100,6 +128,11 @@ class Playback:
         self.duration = None
         self.last_saved = 0.0
         self.unreachable_since = None
+
+    @property
+    def drawn(self):
+        """Whether the subtitles are in the picture, so none go out as a file."""
+        return self.hls or bool(self.burned)
 
     def subtitle_url(self, track):
         return "%s/subs/%s/%s.srt" % (self.base, self.movie.id, track["id"])
@@ -152,6 +185,8 @@ class App:
         self.scanning = self.rescan_pending = False
         self.probe_queue = queue.Queue()
         self.probing = set()  # paths queued for or under ffprobe
+        self.burns = {}  # movie id -> background burn-in job: title, subtitle, progress, running, error, started
+        self.hls = None  # the burn.Hls whose segments the TV is playing, or None
         self.caffeinate = None
         if not os.path.isfile(PANEL_HTML):
             raise SystemExit("control panel page %s is missing" % PANEL_HTML)
@@ -398,6 +433,11 @@ class App:
 
         Every library video stays reachable by its id, so a TV that keeps playing across a
         restart of this service never hits a 404."""
+        burned = self.drawn_source("burned", url_path)
+        if burned:
+            movie, _, srt, _ = burned
+            path = burn.burned(movie, srt)
+            return (path, "video/mp4", movie) if path else None
         m = re.fullmatch(r"/(media|subs)/([0-9a-f]{12})(\.\w+|/(f[0-9a-f]{10})\.srt)", url_path)
         movie = m and self.lookup(m[2])
         if not movie:
@@ -431,17 +471,19 @@ class App:
         info = self.probe_info(movie) or {}
         return any(s.get("codec") not in IMAGE_CODECS for s in info.get("subtitles", []))
 
-    def default_subtitle(self, movie, tracks, allow_off=True):
+    def default_subtitle(self, movie, tracks, allow_off=True, tv_shows_embedded=True):
         """The file to show when the movie starts: the one last chosen for it, which may be none;
         else none when the video has subtitle tracks of its own, which the TV shows by itself;
         else a file beside it named just like it, .srt first. Other files wait for the user.
-        allow_off=False skips an earlier "off" and the video's own tracks, for "subtitles on"."""
+        allow_off=False skips an earlier "off" and the video's own tracks, for "subtitles on".
+        tv_shows_embedded=False (a TV that burns subtitles shows no tracks inside videos either)
+        doesn't count the video's own tracks."""
         saved = self.state.movie(movie.path).get("subtitle")
         usable = [t for t in tracks if not t["missing"]]
         chosen = next((t for t in usable if t["id"] == saved), None)
         if chosen:
             return chosen
-        if allow_off and (saved == "off" or self.has_embedded_subtitles(movie)):
+        if allow_off and (saved == "off" or tv_shows_embedded and self.has_embedded_subtitles(movie)):
             return None
         folder = os.path.dirname(movie.path)
         exact = [t for t in usable if t["exact"] and os.path.dirname(t["path"]) == folder]
@@ -570,7 +612,8 @@ class App:
     def subtitle_status(self, pb):
         info = self.probe_info(pb.movie) or {}
         return {
-            "live": is_samsung(pb.tv),  # switches in place; otherwise by reloading the video
+            "live": is_samsung(pb.tv) and not pb.drawn,  # switches in place; otherwise by reloading the video
+            "drawn": ("hls" if pb.hls else "copy") if pb.drawn else None,
             "selected": pb.subtitle["id"] if pb.subtitle else None,
             "tracks": [
                 {k: t[k] for k in ("id", "label", "lang", "added", "missing")}
@@ -586,9 +629,174 @@ class App:
         """The subtitle URL for the CaptionInfo.sec header on movie's stream, or None."""
         with self.lock:
             pb = self.current
-        if pb is None or pb.movie.id != movie.id or pb.subtitle is None:
+        if pb is None or pb.movie.id != movie.id or pb.subtitle is None or pb.drawn:
             return None
         return pb.subtitle_url(pb.subtitle)
+
+    # Burned-in subtitles
+
+    def drawn_source(self, kind, url_path):
+        """(movie, SubRip path, segment number or None) behind a /burned/ or /hls/ URL, or None."""
+        pattern = {"burned": r"/burned/([0-9a-f]{12})/(f[0-9a-f]{10})\.mp4()",
+                   "hls": r"/hls/([0-9a-f]{12})/(f[0-9a-f]{10})/(index\.m3u8|\d+\.ts)"}[kind]
+        m = re.fullmatch(pattern, url_path)
+        movie = m and self.lookup(m[1])
+        track = movie and next((t for t in self.subtitle_tracks(movie) if t["id"] == m[2] and not t["missing"]), None)
+        if not track:
+            return None
+        try:
+            part = m[3].split(".")[0]
+            return movie, track, prepare(track["path"], self.subtitle_cache), int(part) if part.isdigit() else None
+        except (OSError, ValueError) as e:
+            log("can't burn in subtitles %s: %s" % (track["path"], e))
+            return None
+
+    def drawn_playback(self, movie, tv, base, track, named, style=None):
+        """Playback of movie with subtitle file track burned in. style "copy" plays the finished
+        copy (and starts writing one when there is none), "hls" segments encoded as the TV asks
+        for them; by default the copy when there is one, else HLS. None (send the file as usual)
+        when this Mac can't burn subtitles and nobody asked for them."""
+        why = burn.available()
+        if why:
+            if named or style:
+                raise ValueError(why)
+            log("warning: %s; sending %s's subtitles as a file" % (why, movie.title))
+            return None
+        srt = prepare(track["path"], self.subtitle_cache)
+        done = burn.burned(movie, srt)
+        if done and style != "hls":
+            return Playback(movie, tv, base, track, burned=done)
+        if style == "copy":
+            self.start_burn(movie, track["id"])
+            raise ValueError("%s has no copy with these subtitles yet; making one now (%s). Play it"
+                             " meanwhile with HLS" % (movie.title, self.burn_eta(movie.id) or "about a third of its"
+                                                     " running time"))
+        session = self.hls_session(movie, track, srt)
+        pb = Playback(movie, tv, base, track, hls=True)
+        pb.duration = session.duration
+        return pb
+
+    def hls_session(self, movie, track, srt=None):
+        """The HLS segments of movie with track burned in, replacing those of another movie."""
+        with self.lock:
+            current = self.hls
+        if current is not None and current.movie.id == movie.id and current.track == track["id"]:
+            return current
+        session = burn.Hls(movie, srt or prepare(track["path"], self.subtitle_cache))
+        session.track = track["id"]
+        with self.lock:
+            old, self.hls = self.hls, session
+        if old is not None:
+            old.stop()
+        return session
+
+    def hls_file(self, url_path):
+        """(bytes or a file path, content type) for an /hls/ URL, or None."""
+        source = self.drawn_source("hls", url_path)
+        if source is None:
+            return None
+        movie, track, srt, segment = source
+        session = self.hls_session(movie, track, srt)
+        if segment is None:
+            return burn.playlist(session.duration).encode(), "application/vnd.apple.mpegurl"
+        return session.segment(segment), "video/mp2t"
+
+    def burn_eta(self, movie_id):
+        """"ready around HH:MM" for a running burn, or None."""
+        with self.lock:
+            job = dict(self.burns.get(movie_id) or {})
+        if not job.get("running") or job.get("progress", 0) < 0.02:
+            return None
+        elapsed = time.time() - job["started"]
+        return "ready around %s" % time.strftime("%H:%M", time.localtime(job["started"] + elapsed / job["progress"]))
+
+    def copies(self):
+        """The burned-in copies on disk, as the panel lists them."""
+        try:
+            names = sorted(n for n in os.listdir(burn.BURNED_DIR) if n.endswith(".mp4") and ".part." not in n)
+        except FileNotFoundError:
+            return []
+        out = []
+        for name in names:
+            movie = self.lookup(name[:12])
+            path = os.path.join(burn.BURNED_DIR, name)
+            out.append({"id": name[:12], "title": movie.title if movie else name, "size": os.path.getsize(path),
+                        "path": path})
+        return out
+
+    def delete_copies(self, movie_id):
+        """Delete movie's burned-in copies (any subtitles), unless one is playing."""
+        with self.lock:
+            pb = self.current
+            job = self.burns.get(movie_id)
+        if pb is not None and pb.movie.id == movie_id and pb.burned:
+            raise ValueError("%s is playing from its copy; stop it first" % pb.movie.title)
+        if job and job["running"]:
+            raise ValueError("a copy of %s is still being made" % job["title"])
+        gone = [c for c in self.copies() if c["id"] == movie_id]
+        if not gone:
+            raise ValueError("no copy with burned-in subtitles to delete")
+        for c in gone:
+            os.remove(c["path"])
+            log("deleted %s (%.1f GB)" % (c["path"], c["size"] / 1e9))
+        with self.lock:
+            self.burns.pop(movie_id, None)
+        return {"deleted": len(gone), "bytes": sum(c["size"] for c in gone)}
+
+    def start_burn(self, movie, choice=None):
+        """Start writing a copy of movie with a subtitle file burned in, in the background:
+        choice names the file as match_track does; by default the movie's usual one."""
+        why = burn.available()
+        if why:
+            raise ValueError(why)
+        tracks = self.subtitle_tracks(movie)
+        track = match_track(tracks, str(choice)) if choice else self.default_subtitle(movie, tracks, allow_off=False)
+        if track is None:
+            raise ValueError("%s has no subtitle file to burn in; add one" % movie.title)
+        srt = prepare(track["path"], self.subtitle_cache)
+        if burn.burned(movie, srt):
+            return {"ready": True}
+        with self.lock:
+            job = self.burns.get(movie.id)
+            if job and job["running"]:
+                return {"running": True}
+            self.burns[movie.id] = {"title": movie.title, "subtitle": track["label"], "progress": 0.0,
+                                    "running": True, "error": None, "started": time.time()}
+        threading.Thread(target=self._burn, args=(movie, srt), daemon=True).start()
+        return {"started": True}
+
+    def _burn(self, movie, srt):
+        out = burn.burned_path(movie, srt)
+        part = out[:-4] + ".part.mp4"
+        try:
+            sup, info = burn.prepare(movie, srt)
+            os.makedirs(burn.BURNED_DIR, exist_ok=True)
+            log("burning subtitles into %s" % movie.title)
+            with tempfile.TemporaryFile("w+") as errors:
+                proc = subprocess.Popen(burn.burn_command(movie.path, sup, info, part),
+                                        stdout=subprocess.PIPE, stderr=errors, text=True)
+                # Keep the Mac awake for as long as this encode runs.
+                subprocess.Popen(["/usr/bin/caffeinate", "-i", "-w", str(proc.pid)])
+                with proc.stdout:
+                    for line in proc.stdout:
+                        key, _, value = line.strip().partition("=")
+                        if key == "out_time_us" and value.isdigit() and info["duration"]:
+                            with self.lock:
+                                self.burns[movie.id]["progress"] = min(1.0, int(value) / 1e6 / info["duration"])
+                proc.wait()
+                if proc.returncode != 0:
+                    errors.seek(0)
+                    raise RuntimeError("ffmpeg failed: %s" % (errors.read().strip()[-300:] or proc.returncode))
+            os.replace(part, out)
+            log("subtitles burned into %s: %s" % (movie.title, out))
+            with self.lock:
+                self.burns[movie.id].update(progress=1.0, running=False)
+        except Exception as e:
+            log("burning subtitles into %s failed: %s" % (movie.title, e))
+            with contextlib.suppress(OSError):
+                os.remove(part)
+            with self.lock:
+                self.burns[movie.id].update(running=False, error=str(e))
 
     # Playback
 
@@ -602,11 +810,11 @@ class App:
                 self.caffeinate.wait()
                 self.caffeinate = None
 
-    def open_movie(self, movie_id, from_start=False, subtitle=None):
+    def open_movie(self, movie_id, from_start=False, subtitle=None, style=None):
         with self.playback_lock:
-            self._open_movie(movie_id, from_start, subtitle)
+            self._open_movie(movie_id, from_start, subtitle, style=style)
 
-    def _open_movie(self, movie_id, from_start, subtitle, at=None):
+    def _open_movie(self, movie_id, from_start, subtitle, at=None, style=None):
         """Load a movie on the selected TV from its resume point, or from position at when set."""
         movie = self.lookup(movie_id)
         if movie is None or movie.root not in self.state.get("libraries"):
@@ -626,14 +834,22 @@ class App:
                 self.subtitle_ready(track)
             self.remember_subtitle(movie, track)
         else:  # picked by the rules: a broken file must not keep the movie from playing
-            track = self.default_subtitle(movie, tracks)
+            track = self.default_subtitle(movie, tracks, tv_shows_embedded=subtitle_mode(tv) != "burn")
             try:
                 if track:
                     self.subtitle_ready(track)
             except ValueError as e:
                 log("warning: playing %s without subtitles: %s" % (movie.title, e))
                 track = None
-        pb = Playback(movie, tv, "http://%s:%d" % (lan_ip_towards(tv["ip"]), self.port), track)
+        base = "http://%s:%d" % (lan_ip_towards(tv["ip"]), self.port)
+        pb = None
+        if style and not (track and subtitle_mode(tv) == "burn"):
+            raise ValueError("%s for %s needs a TV that burns subtitles in, and subtitles chosen"
+                             % ("HLS" if style == "hls" else "a copy", movie.title))
+        if track and subtitle_mode(tv) == "burn":
+            pb = self.drawn_playback(movie, tv, base, track, named=subtitle is not None, style=style)
+        if pb is None:
+            pb = Playback(movie, tv, base, track)
         with self.lock:
             if self.state.get("tv") != tv["id"]:
                 raise RuntimeError("another TV was selected while opening %s; open it again" % movie.title)
@@ -641,7 +857,8 @@ class App:
             self.keep_awake(True)
         if previous is not None:
             self.save_progress(previous)
-        log("opening %s on %s%s" % (movie.title, tv["name"], " at " + hms(seek) if seek else ""))
+        how = " with subtitles burned in (%s)" % ("HLS" if pb.hls else "copy") if pb.drawn else ""
+        log("opening %s on %s%s%s" % (movie.title, tv["name"], " at " + hms(seek) if seek else "", how))
         try:
             self.load(pb, seek)
         except BaseException:
@@ -662,7 +879,7 @@ class App:
         # A Samsung player registers only the first file, so only the chosen one goes out;
         # set_caption or a reload switches to others later.
         sub_xml = pv_attrs = pv_ns = ""
-        if pb.subtitle:
+        if pb.subtitle and not pb.drawn:
             url = pb.subtitle_url(pb.subtitle)
             sub_xml = (
                 '<res protocolInfo="http-get:*:text/srt:*">%s</res>'
@@ -680,20 +897,27 @@ class App:
             ' xmlns:sec="http://www.sec.co.kr/"%s>'
             '<item id="0" parentID="-1" restricted="1"><dc:title>%s</dc:title>'
             "<upnp:class>object.item.videoItem.movie</upnp:class>"
-            '<res protocolInfo="http-get:*:%s:%s" size="%d"%s>%s</res>%s'
-            "</item></DIDL-Lite>"
-            % (pv_ns, escape(title), video_type(pb.movie, pb.tv), DLNA_FEATURES, pb.movie.size, pv_attrs,
-               pb.media_url, sub_xml)
+            "%s%s</item></DIDL-Lite>"
+            % (pv_ns, escape(title), self.video_res(pb, pv_attrs), sub_xml)
         )
         transport(pb.tv, "SetAVTransportURI", CurrentURI=pb.media_url, CurrentURIMetaData=didl)
         self.when_ready(pb.tv, "Play", Speed=1)
         if start is not None:
             self.when_ready(pb.tv, "Seek", Unit="REL_TIME", Target=hms(start))
-        if pb.subtitle and is_samsung(pb.tv):
+        if pb.subtitle and not pb.drawn and is_samsung(pb.tv):
             try:
                 self.enable_subtitles_on_load(pb)
             except RuntimeError as e:  # the movie plays anyway; the panel can still switch them on
                 log("warning: couldn't switch on subtitles: %s" % e)
+
+    def video_res(self, pb, pv_attrs):
+        """The DIDL res element for pb's video."""
+        if pb.hls:
+            return '<res protocolInfo="http-get:*:application/vnd.apple.mpegurl:*" duration="%s.000">%s</res>' % (
+                hms(pb.duration), escape(pb.media_url))
+        ctype = "video/mp4" if pb.burned else video_type(pb.movie, pb.tv)
+        return '<res protocolInfo="http-get:*:%s:%s" size="%d"%s>%s</res>' % (
+            ctype, DLNA_FEATURES, pb.size, pv_attrs, pb.media_url)
 
     def when_ready(self, tv, action, **args):
         # The TV opens a newly set stream asynchronously and rejects transport actions with
@@ -832,6 +1056,7 @@ class App:
             "title": movie.title,
             "year": movie.year,
             "subs": {"count": len(tracks) + len(embedded), "languages": sorted(languages - {None})},
+            "copy": any(c["id"] == movie.id for c in self.copies()),
             "position": saved.get("position", 0),
             "duration": saved.get("duration") or (info or {}).get("duration"),
             "watched": saved.get("watched", False),
@@ -847,6 +1072,9 @@ class App:
             problems, private = dict(self.library_problems), dict(self.library_private)
             scanning, checking = self.scanning, len(self.probing)
             queued, queue_error = list(self.state.get("queue")), self.queue_error
+            burns = [dict(job, id=movie_id) for movie_id, job in self.burns.items()]
+        for job in burns:
+            job["eta"] = self.burn_eta(job["id"])
         movies = [m for m in movies if m.root in libraries]
         available = {m.id for m in movies}
         groups = []
@@ -860,6 +1088,8 @@ class App:
             },
             "queue": [dict(item, available=item["id"] in available) for item in queued],
             "queue_error": queue_error,
+            "burns": burns,
+            "copies": self.copies(),
             "libraries": [
                 {"path": p, "name": os.path.basename(p) or p, "problems": problems.get(p, []), "private": private.get(p, [])}
                 for p in libraries
@@ -897,9 +1127,11 @@ class App:
 
     def control(self, action, body):
         if action == "open":
-            subtitle = body.get("subtitle")
+            subtitle, style = body.get("subtitle"), body.get("burn")
+            if style not in (None, "hls", "copy"):
+                raise ValueError("burn must be hls or copy")
             self.open_movie(str(body["id"]), from_start=bool(body.get("from_start")),
-                            subtitle=None if subtitle is None else str(subtitle))
+                            subtitle=None if subtitle is None else str(subtitle), style=style)
         elif action == "stop":
             with self.playback_lock:
                 tv = self.require_tv()
@@ -928,6 +1160,17 @@ class App:
             return self.add_subtitles(body)
         elif action == "remove_subtitles":
             self.remove_subtitles(body)
+        elif action == "burn":
+            return self.start_burn(self.subtitle_movie(body), body.get("subtitle"))
+        elif action == "delete_copy":
+            return self.delete_copies(self.subtitle_movie(body).id)
+        elif action == "subtitle_mode":
+            tv = self.require_tv()
+            mode = str(body["mode"])
+            if mode not in SUBTITLE_MODES:
+                raise ValueError("subtitle mode must be one of %s" % ", ".join(SUBTITLE_MODES))
+            self.state.update_tv(tv["id"], subtitle_mode=mode)
+            return {"mode": mode, "subtitles": subtitle_mode(self.state.tv(tv["id"]))}
         elif action == "add_folder":
             return self.add_folder()
         elif action == "remove_folder":
