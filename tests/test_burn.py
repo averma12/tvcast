@@ -19,6 +19,7 @@ from tvcast.library import scan_library
 REAL_POPEN = subprocess.Popen  # the playback tests patch Popen; the burn-job tests run real shells
 REAL_PREPARE = burn.prepare  # the playback tests patch prepare and Thread; one test needs both for real
 REAL_THREAD = __import__("threading").Thread
+REAL_HLS = burn.Hls
 SRT = "1\n00:01:17,936 --> 00:01:21,212\nHi.\n"
 
 
@@ -495,3 +496,39 @@ class LifecycleTest(BurnCase):
         self.assertIn("a-1.part.mp4", notes[0])
         self.assertEqual(os.listdir(self.burned_dir), ["b-2.mp4"])
         self.assertFalse(os.path.exists(os.path.join(cache, "hls")))
+
+
+class RaceTest(BurnCase):
+    """Two callers at once after a restart (a TV request and the monitor) share one HLS session."""
+
+    def test_sessions_for_the_same_movie_keep_separate_folders(self):
+        cache = os.path.join(self.root, "cache")
+        with mock.patch.object(burn, "CACHE", cache), \
+                mock.patch.object(burn, "prepare", return_value=("s.sup", {"duration": 60.0})), \
+                mock.patch.object(burn, "read_sets", return_value=[]):
+            first, second = REAL_HLS(self.film, "f.srt"), REAL_HLS(self.film, "f.srt")
+        self.assertNotEqual(first.dir, second.dir)
+        first.stop()
+        self.assertTrue(os.path.isdir(second.dir))
+        second.stop()
+
+    def test_concurrent_callers_share_one_session(self):
+        made = []
+
+        class SlowHls(FakeHls):
+            def __init__(self, movie, srt):
+                made.append(self)
+                time.sleep(0.2)  # probing and drawing the subtitles take a while
+                super().__init__(movie, srt)
+
+        got = []
+        with mock.patch.object(burn, "Hls", SlowHls):
+            threads = [REAL_THREAD(target=lambda: got.append(self.app.hls_session(self.film, self.track)))
+                       for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(made), 1)
+        self.assertIs(got[0], got[1])
+        self.assertFalse(got[0].stopped)
