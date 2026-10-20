@@ -74,9 +74,9 @@ def subtitle_track(path, video_stem=None):
 
 def find_subtitles(dirpath, filenames, subdirs, video_stem, siblings):
     """Subtitle tracks for a video, sorted by label: files named like it ("Film.srt",
-    "Film.en.srt") and files in Subs/<video name>/; for a video alone in its folder (no
-    siblings, the names of the other videos there), also every other subtitle file beside it
-    and in Subs/."""
+    "Film.en.srt") beside it or in Subs/, and files in Subs/<video name>/; for a video alone in
+    its folder (no siblings, the names of the other videos there), also every other subtitle
+    file beside it and in Subs/."""
     stems = [s.lower() for s in [video_stem] + list(siblings)]
 
     def owner(f):
@@ -91,8 +91,7 @@ def find_subtitles(dirpath, filenames, subdirs, video_stem, siblings):
             continue
         folder = os.path.join(dirpath, d)
         entries = sorted(os.listdir(folder))
-        if not siblings:
-            paths += [os.path.join(folder, f) for f in entries if is_subtitle(f)]
+        paths += [os.path.join(folder, f) for f in entries if is_subtitle(f) and (not siblings or owner(f) == stems[0])]
         # TV releases keep one folder of subtitles per episode: Subs/<episode file name>/2_English.srt.
         for e in entries:
             if e.lower() == stems[0] and os.path.isdir(os.path.join(folder, e)):

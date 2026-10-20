@@ -90,11 +90,16 @@ class FindSubtitlesTest(LibraryTest):
         self.assertEqual([label for _, label in self.find("Film")],
                          ["English", "English SDH", "French", "English Commentary"])
 
-    def test_episode_folder_in_subs_belongs_to_its_episode(self):
+    def test_episode_files_and_folders_in_subs_belong_to_their_episode(self):
         touch(self.root, "Subs", "Show.S01E01", "2_English.srt")
         touch(self.root, "Subs", "Show.S01E02", "2_English.srt")
-        self.assertEqual(self.find("Show.S01E01", siblings=["Show.S01E02"]),
-                         [(os.path.join("Subs", "Show.S01E01", "2_English.srt"), "English")])
+        touch(self.root, "Subs", "Show.S01E01.fr.srt")
+        touch(self.root, "Subs", "Show.S01E02.fr.srt")
+        touch(self.root, "Subs", "unrelated.srt")
+        self.assertEqual(self.find("Show.S01E01", siblings=["Show.S01E02"]), [
+            (os.path.join("Subs", "Show.S01E01", "2_English.srt"), "English"),
+            (os.path.join("Subs", "Show.S01E01.fr.srt"), "French"),
+        ])
 
     def test_shared_labels_name_their_files(self):
         touch(self.root, "Film.pt.srt")

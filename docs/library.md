@@ -31,7 +31,7 @@ Movies/
 Subtitle files work on Samsung TVs: `.srt`, `.ass`, `.ssa` and `.vtt`, in any language. TV Cast
 lists these files for a video:
 
-- files named like it: `Film.srt`, `Film.en.srt`, `Film.fr.forced.srt`, `Film.en.sdh.ass`;
+- files named like it, beside it or in `Subs/`: `Film.srt`, `Film.en.srt`, `Film.fr.forced.srt`, `Film.en.sdh.ass`;
 - files in `Subs/Film/` (episode packs);
 - for a video alone in its folder, every other subtitle file beside it and in `Subs/`.
 
