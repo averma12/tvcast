@@ -30,17 +30,18 @@ so they never disagree.
 | `tvcast/discovery.py` | Finds TVs (SSDP) and reads their device descriptions. |
 | `tvcast/upnp.py` | SOAP calls to the TV: play, pause, seek, volume, Samsung subtitles. |
 | `tvcast/samsung.py` | Samsung remote: pairing, keys, typing, apps. |
-| `tvcast/library.py` | Folder scanning, titles, subtitle matching, codec checks. |
+| `tvcast/library.py` | Folder scanning, titles, codec and subtitle-track checks (ffprobe), native pickers. |
+| `tvcast/subtitles.py` | Subtitle files: finding and labelling them, converting `.ass/.ssa/.vtt` and UTF-16 to SubRip. |
 | `tvcast/state.py` | The JSON state file, including the ordered playback queue. |
 | `tvcast/panel.html` | One HTML file, plain JavaScript. Status polls every 2 s (10 s in a background tab); app checks every 15 s. |
 
 ## Playing a movie
 
 ```
-open → SetAVTransportURI (video URL + title + subtitles)
+open → SetAVTransportURI (video URL + title + the chosen subtitle file)
      → Play            retried while the TV answers "701: not ready"
      → Seek            to the resume point
-     → subtitles on    Samsung only
+     → subtitles on    Samsung only; X_ControlCaption also switches files later
 then every 2 s: ask the TV where it is; save the position every 10 s
 when it ends: mark progress, then play the next queued movie if there is one
 ```
@@ -67,8 +68,32 @@ doesn't lose the TV or its pairing.
 - **Queue consumption after loading.** Entries leave the queue only after playback loads, so
   failed requests can be retried. A playback lock serializes starts, stops and TV selection with
   the monitor's queue advancement; status and queue edits remain responsive during TV requests.
-- **Samsung extras.** The `CaptionInfo.sec` header and `sec:` tags attach subtitles; other TVs
-  ignore them. MKV files go out as `video/x-mkv`. Subtitles need an explicit "enable" after loading.
+- **Samsung extras.** The `CaptionInfo.sec` header (the TV asks for it with
+  `getcaptionInfo.sec: 1`) and `sec:` tags attach subtitles. MKV files go out to Samsungs as
+  `video/x-mkv`, and to other TVs as the registered `video/x-matroska`. Subtitles need an explicit
+  "enable" after loading.
+- **Subtitle files on Android TVs (untested on one).** DLNA has no subtitle standard, so the
+  chosen file goes out every common way, after what Universal Media Server's renderer profiles
+  and Kodi's source show:
+  - a `text/srt` `res`, which Kodi's and BubbleUPnP's renderers list as a track;
+  - the Samsung tags and header, which Philips Android TVs read;
+  - `pv:subtitleFileUri`/`pv:subtitleFileType` on the video's `res`, which UMS sends to Sony and
+    others. Samsungs don't get these, so their requests stay as tested.
+
+  These players take a file only with the video, so switching loads the video again at its
+  position. A fresh `Playback` replaces the current one, so the monitor doesn't read the reload's
+  brief stop as the movie ending.
+- **One subtitle file per load, any file after.** Measured on a 2021 Samsung (AU7500):
+  - The player registers only the first `CaptionInfoEx` it gets, so only the chosen file goes out.
+  - `X_ControlCaption Enable` with any caption URL, even one never sent, fetches and draws it at
+    once. That is how files switch mid-movie, with no reload.
+  - The player draws tracks embedded in MKV/MP4 itself (the first one by default) and lists them
+    in its own menu, but not in `X_GetCaptionState`. TV Cast can't see or switch them.
+  - An enabled file replaces an embedded track. `Disable` hides a file but never an embedded
+    track.
+  - UTF-8 (no BOM) draws accents and Devanagari, and Windows-1252 also draws correctly. So `.srt`
+    files go out as they are, and only UTF-16 and the `.ass/.ssa/.vtt` conversions are rewritten,
+    keeping their text bytes. Converted copies are cached in `subtitles/` beside `state.json`.
 - **Remote apps by ID.** Samsung TVs ignore the "list installed apps" request, so known app IDs are
   checked with at most four requests at a time. REST launches use an empty POST, then wait up to
   10 s for `visible: true`; `running` alone can mean a background app. Unconfirmed launches show

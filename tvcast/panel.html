@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>TV Cast</title>
+<!-- Lucide "tv". A favicon has no page CSS, so it carries the accent colours itself. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23315f9f%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cstyle%3E%40media%20%28prefers-color-scheme%3A%20dark%29%20%7B%20svg%20%7B%20stroke%3A%20%239bbdf2%3B%20%7D%20%7D%3C%2Fstyle%3E%3Crect%20width%3D%2220%22%20height%3D%2215%22%20x%3D%222%22%20y%3D%227%22%20rx%3D%222%22%20ry%3D%222%22%20%2F%3E%3Cpolyline%20points%3D%2217%202%2012%207%207%202%22%20%2F%3E%3C%2Fsvg%3E">
 <style>
   :root {
     --bg: #f4f6f8; --surface: #fff; --control: #e9edf2; --text: #20252c;
@@ -110,9 +112,9 @@
   .times { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; align-items: center; }
   .controls .primary { min-width: 84px; }
-  .subtitles { margin-top: 14px; display: flex; gap: 8px; align-items: center; font-size: 13px; }
+  .subtitles { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+  .subtitles .select-wrap { flex: 0 1 280px; }
   .subtitles button { min-height: 40px; padding: 8px 14px; }
-  .subtitles button[aria-pressed=true] { background: var(--active); border-color: var(--accent); }
   .library-tools { display: flex; gap: 10px; margin-top: 18px; }
   .library-tools input { flex: 1; }
   .library-tools .select-wrap { width: 186px; max-width: 100%; flex: none; }
@@ -198,7 +200,7 @@
   @media (max-height: 850px) { .remote-panel { position: static; } }
   @media (prefers-reduced-motion: reduce) { button:active:not(:disabled) { transform: none; } }
 </style>
-<!-- Icons: https://lucide.dev (chevron-down, x, arrow-up, arrow-down)
+<!-- Icons: https://lucide.dev (chevron-down, x, arrow-up, arrow-down, tv)
 ISC License
 
 Copyright (c) 2026 Lucide Icons and Contributors
@@ -306,7 +308,8 @@ SOFTWARE.
         <input type="range" id="seek" min="0" max="1" value="0" aria-label="Seek" disabled>
         <div class="times"><span id="pos"></span><span id="left"></span></div>
         <div class="controls"><button data-skip="-30">−30s</button><button data-skip="-10">−10s</button><button class="primary" id="toggle" disabled>Play</button><button data-skip="10">+10s</button><button data-skip="30">+30s</button><button id="stop" disabled>Stop</button></div>
-        <div class="subtitles" id="subctl" role="group" aria-label="Subtitles" hidden><span>Subtitles</span><button id="subOn" aria-pressed="false">On</button><button id="subOff" aria-pressed="false">Off</button></div>
+        <div class="subtitles" id="subctl" hidden><label for="subsel">Subtitles</label><span class="select-wrap"><select id="subsel"></select></span><button id="subAdd">Add file…</button><button id="subRemove" class="link-button" hidden>Remove</button></div>
+        <p class="note" id="subnote"></p>
         <p class="note" id="upnext"></p>
       </section>
       <p class="msg" id="msg" role="status"></p>
@@ -352,10 +355,10 @@ const ago = s => s == null ? 'No requests yet' : s < 2 ? 'Just now' : s < 120 ? 
 const STATES = {PLAYING:'Playing from your Mac', PAUSED_PLAYBACK:'Paused', STOPPED:'Stopped', TRANSITIONING:'Loading…', NO_MEDIA_PRESENT:'No media loaded'};
 const RESUME_MIN = 30;
 let st = null, online = false, selecting = false, finding = false, pairing = false;
-let opening = null, choosingFolder = false, seeking = false, volDragging = false, queueBusy = false;
+let opening = null, choosingFolder = false, choosingSubs = false, seeking = false, volDragging = false, queueBusy = false;
 let apps = null, appsLoading = false, appsAt = 0, appsNext = 0, appsGeneration = 0, appsSig = '';
 let remoteTv = null, launching = null, powerArmed = false, powerTimer;
-let tvSig = '', libSig = '', folderSig = '', queueSig = '', refreshId = 0;
+let tvSig = '', libSig = '', folderSig = '', queueSig = '', subSig = '', refreshId = 0;
 const errors = {};
 const show = (id, text, info = false) => { $(id).textContent = text || ''; $(id).className = 'msg' + (info ? ' info' : ''); };
 const canControl = () => online && !selecting && !!st?.selected;
@@ -425,13 +428,33 @@ function renderStatus() {
     showTimes(ours ? tv.position : null, ours ? tv.duration : null);
   }
   $('toggle').textContent = ours && tv.state === 'PLAYING' ? 'Pause' : 'Play';
-  const subs = ours ? tv.subtitles : null;
-  $('subctl').hidden = subs == null;
-  $('subOn').setAttribute('aria-pressed', String(subs === true));
-  $('subOff').setAttribute('aria-pressed', String(subs === false));
+  renderSubtitles(ours ? st.now.subtitles : null);
   const next = st.queue[0];
   $('upnext').textContent = next ? 'Up next: ' + next.title : '';
   show('msg', errors.msg || (st.now && st.tv_error));
+}
+// The track shown, or 'off'; the TV's own report wins, since its remote can switch them off too.
+const shownSubtitle = subs => subs.selected && st.tv?.subtitles !== false ? subs.selected : 'off';
+function renderSubtitles(subs) {
+  $('subnote').textContent = !subs ? '' : [
+    subs.embedded.length ? 'In the video file: ' + subs.embedded.map(t => t.label + (t.image ? ' (Blu-ray image subtitles; the TV may not show them)' : '')).join(', ') + ". The TV shows these itself; switch or hide them with its own subtitle menu." : '',
+    subs.live ? '' : 'Switching subtitles reloads the video where it is, with a short pause.',
+  ].filter(Boolean).join(' ');
+  $('subctl').hidden = !subs;
+  if (!subs) return;
+  const value = shownSubtitle(subs);
+  $('subRemove').hidden = !subs.tracks.find(t => t.id === value)?.added;
+  $('subAdd').disabled = choosingSubs;
+  $('subAdd').textContent = choosingSubs ? 'Choosing…' : 'Add file…';
+  // Rebuilding the options closes an open menu, so only do it when they change.
+  // Without a file from TV Cast, the TV shows the video's own subtitles, if it has any it can draw.
+  const none = subs.embedded.some(t => !t.image) ? 'From the video (TV menu)' : 'Off';
+  const sig = JSON.stringify([subs.tracks, value, none]);
+  if (sig === subSig) return;
+  subSig = sig;
+  $('subsel').innerHTML = `<option value="off">${none}</option>` + subs.tracks.map(t =>
+    `<option value="${esc(t.id)}" ${t.missing ? 'disabled' : ''}>${esc(t.label + (t.added ? (t.missing ? ' (added, missing)' : ' (added)') : ''))}</option>`).join('');
+  $('subsel').value = value;
 }
 function showTimes(pos, dur) {
   $('pos').textContent = pos == null ? '' : `${clock(pos)} / ${clock(dur)}`;
@@ -441,7 +464,7 @@ function showTimes(pos, dur) {
 function movieRow(m) {
   const current = st.now?.id === m.id;
   const partial = m.position >= RESUME_MIN;
-  const meta = [m.year, runtime(m.duration), m.subs ? 'Subtitles' : '', !current && partial ? `Resume at ${clock(m.position)}` : m.watched ? 'Watched' : ''];
+  const meta = [m.year, runtime(m.duration), m.subs.count ? ['Subtitles', ...m.subs.languages.map(l => l.toUpperCase())].join(' ') : '', !current && partial ? `Resume at ${clock(m.position)}` : m.watched ? 'Watched' : ''];
   const queued = st.queue.some(item => item.id === m.id);
   const tag = current ? 'Casting' : '';
   let actions = '';
@@ -624,8 +647,9 @@ $('toggle').onclick = togglePlay;
 $('stop').onclick = () => act('stop');
 document.querySelectorAll('[data-skip]').forEach(b => { b.setAttribute('aria-label', `${+b.dataset.skip < 0 ? 'Back' : 'Forward'} ${Math.abs(+b.dataset.skip)} seconds`); b.onclick = () => skip(+b.dataset.skip); });
 // Re-send Enable even when captions report on: Samsung can report them without drawing them.
-$('subOn').onclick = () => act('subtitles', {on:true});
-$('subOff').onclick = () => act('subtitles', {on:false});
+$('subsel').onchange = e => act('subtitles', {track:e.target.value});
+$('subAdd').onclick = async () => { choosingSubs = true; renderStatus(); await act('add_subtitles'); choosingSubs = false; renderStatus(); };
+$('subRemove').onclick = () => act('remove_subtitles', {track:$('subsel').value});
 $('search').oninput = $('filter').onchange = renderLibrary;
 $('rescan').onclick = () => act('rescan', {}, 'libmsg');
 $('addFolder').onclick = async () => { choosingFolder = true; renderLibrary(); await act('add_folder', {}, 'libmsg'); choosingFolder = false; renderLibrary(); };
@@ -686,7 +710,7 @@ document.addEventListener('keydown', e => {
   else if (e.target.closest('button, summary, a')) return;
   else if (e.key === ' ') { if (ownsPlayback()) { e.preventDefault(); togglePlay(); } }
   else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { if (ownsPlayback()) { e.preventDefault(); skip(e.key === 'ArrowLeft' ? -10 : 10); } }
-  else if (e.key.toLowerCase() === 'c' && ownsPlayback() && st.tv.subtitles != null) act('subtitles', {on:!st.tv.subtitles});
+  else if (e.key.toLowerCase() === 'c' && ownsPlayback() && st.now.subtitles.tracks.length) act('subtitles', {track:shownSubtitle(st.now.subtitles) === 'off' ? 'on' : 'off'});
 });
 poll();
 </script>

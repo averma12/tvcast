@@ -122,7 +122,7 @@ def use_tv(port, which):
     print("Selected %s (%s)" % (tv["name"], tv["ip"]))
 
 
-def open_video(port, query, from_start):
+def open_video(port, query, from_start, subs):
     # The daemon rescans only when the panel page loads or a folder changes, so ask for one to
     # find videos added since.
     api(port, "rescan", {})
@@ -136,8 +136,55 @@ def open_video(port, query, from_start):
     movie = pick(query, [(video_label(m), m) for m in st["library"]], "video")
     if movie["problem"]:
         print("warning: %s; trying anyway" % movie["problem"], file=sys.stderr)
+    body = {"id": movie["id"], "from_start": from_start}
+    if subs is not None and os.path.isfile(os.path.expanduser(subs)):
+        path = os.path.abspath(os.path.expanduser(subs))
+        body["subtitle"] = api(port, "add_subtitles", {"id": movie["id"], "path": path})["track"]
+    elif subs is not None:
+        body["subtitle"] = subs
     print("Opening %s" % video_label(movie))
-    api(port, "open", {"id": movie["id"], "from_start": from_start})
+    api(port, "open", body)
+
+
+def playing_subtitles(port):
+    """The status and the playing video's subtitle summary."""
+    st = api(port, "status")
+    if not st["now"]:
+        raise SystemExit("no video from this library is playing")
+    return st, st["now"]["subtitles"]
+
+
+def subtitles(port, choice, add, remove):
+    if add:
+        print("Showing %s" % api(port, "add_subtitles", {"path": os.path.abspath(os.path.expanduser(add))})["label"])
+        return
+    if remove:
+        tracks = playing_subtitles(port)[1]["tracks"]
+        if remove.isdigit():
+            track = tracks[int(remove) - 1] if 1 <= int(remove) <= len(tracks) else None
+        else:
+            track = pick(remove, [(t["label"], t) for t in tracks if t["added"]], "added subtitle file")
+        if track is None or not track["added"]:
+            raise SystemExit('no added subtitle file number %s; "tv subs" lists them' % remove)
+        api(port, "remove_subtitles", {"track": track["id"]})
+        print("Removed %s" % track["label"])
+        return
+    if choice:
+        api(port, "subtitles", {"track": choice})
+    st, subs = playing_subtitles(port)
+    off = subs["selected"] is None or (st["tv"] or {}).get("subtitles") is False
+    own = any(not t["image"] for t in subs["embedded"])
+    print("%s    off%s" % ("*" if off else " ", " (the TV shows the video's own subtitles)" if own else ""))
+    for i, t in enumerate(subs["tracks"], 1):
+        note = " (added%s)" % (", missing" if t["missing"] else "") if t["added"] else ""
+        print("%s %2d. %s%s" % ("*" if not off and t["id"] == subs["selected"] else " ", i, t["label"], note))
+    if subs["embedded"]:
+        print("In the video file; switch or hide these with the TV's own subtitle menu:")
+        for t in subs["embedded"]:
+            note = " (Blu-ray image subtitles; the TV may not show them)" if t["image"] else ""
+            print("       %s%s" % (t["label"], note))
+    if not subs["tracks"] and not subs["embedded"]:
+        print('No subtitles; add a file with "tv subs --add FILE"')
 
 
 def key_name(name):
@@ -215,6 +262,8 @@ def main():
     c = command("open", "play the library video whose title contains QUERY")
     c.add_argument("query", nargs="+", metavar="QUERY")
     c.add_argument("--from-start", action="store_true", help="ignore the resume point")
+    c.add_argument("--subs", metavar="LANGUAGE|FILE",
+                   help="subtitles to show: a language, part of a track name, off, or a subtitle file")
     command("play", "resume playback")
     command("pause", "pause playback")
     command("stop", "stop playback")
@@ -224,8 +273,12 @@ def main():
     c.add_argument("level", type=int, metavar="0-100")
     c = command("mute", "mute or unmute")
     c.add_argument("on", choices=["on", "off"])
-    c = command("subs", "show or hide the subtitles of the playing video")
-    c.add_argument("on", choices=["on", "off"])
+    c = command("subs", "list the playing video's subtitles, or choose one")
+    c.add_argument("choice", nargs="?", metavar="on|off|NUMBER|LANGUAGE",
+                   help="on, off, a number from the list, a language, or part of a track name")
+    g = c.add_mutually_exclusive_group()
+    g.add_argument("--add", metavar="FILE", help="show a subtitle file (.srt, .ass, .ssa, .vtt) from this Mac")
+    g.add_argument("--remove", metavar="NUMBER|NAME", help="detach a subtitle file added with --add or the panel")
     c = command("key", "press remote keys on a Samsung TV, e.g. home, KEY_VOLUP")
     c.add_argument("names", nargs="+", metavar="NAME")
     c = command("daemon", "run the panel, stream server and playback tracking in the foreground")
@@ -259,7 +312,7 @@ def main():
         api(args.panel_port, "pair", {})
         print("Paired")
     elif args.cmd == "open":
-        open_video(args.panel_port, " ".join(args.query), args.from_start)
+        open_video(args.panel_port, " ".join(args.query), args.from_start, args.subs)
     elif args.cmd in ("play", "pause", "stop"):
         api(args.panel_port, args.cmd, {})
     elif args.cmd == "seek":
@@ -272,6 +325,8 @@ def main():
     elif args.cmd == "mute":
         api(args.panel_port, "mute", {"on": args.on == "on"})
     elif args.cmd == "subs":
-        api(args.panel_port, "subtitles", {"on": args.on == "on"})
+        if args.choice and (args.add or args.remove):
+            p.error("subs takes a choice or --add/--remove, not both")
+        subtitles(args.panel_port, args.choice, args.add, args.remove)
     elif args.cmd == "key":
         api(args.panel_port, "keys", {"keys": [key_name(n) for n in args.names]})
