@@ -442,7 +442,8 @@ function renderStatus() {
 const shownSubtitle = subs => subs.selected && st.tv?.subtitles !== false ? subs.selected : 'off';
 function renderSubtitles(subs) {
   $('subnote').textContent = !subs ? '' : [
-    subs.embedded.length ? 'In the video file: ' + subs.embedded.map(t => t.label + (t.image ? ' (Blu-ray image subtitles; the TV may not show them)' : '')).join(', ') + ". The TV shows these itself; switch or hide them with its own subtitle menu." : '',
+    subs.burn ? (subs.embedded.length ? 'This TV can\'t show the subtitles inside the video; choose a file to burn in.' : '')
+      : subs.embedded.length ? 'In the video file: ' + subs.embedded.map(t => t.label + (t.image ? ' (Blu-ray image subtitles; the TV may not show them)' : '')).join(', ') + ". The TV shows these itself; switch or hide them with its own subtitle menu." : '',
     subs.live ? '' : 'Switching subtitles reloads the video where it is, with a short pause.',
   ].filter(Boolean).join(' ');
   $('subctl').hidden = !subs;
@@ -453,7 +454,7 @@ function renderSubtitles(subs) {
   $('subAdd').textContent = choosingSubs ? 'Choosing…' : 'Add file…';
   // Rebuilding the options closes an open menu, so only do it when they change.
   // Without a file from TV Cast, the TV shows the video's own subtitles, if it has any it can draw.
-  const none = subs.embedded.some(t => !t.image) ? 'From the video (TV menu)' : 'Off';
+  const none = !subs.burn && subs.embedded.some(t => !t.image) ? 'From the video (TV menu)' : 'Off';
   const sig = JSON.stringify([subs.tracks, value, none]);
   if (sig === subSig) return;
   subSig = sig;

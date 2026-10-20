@@ -614,6 +614,7 @@ class App:
         return {
             "live": is_samsung(pb.tv) and not pb.drawn,  # switches in place; otherwise by reloading the video
             "drawn": ("hls" if pb.hls else "copy") if pb.drawn else None,
+            "burn": subtitle_mode(pb.tv) == "burn",  # the TV shows no subtitles, not even the video's own
             "selected": pb.subtitle["id"] if pb.subtitle else None,
             "tracks": [
                 {k: t[k] for k in ("id", "label", "lang", "added", "missing")}
