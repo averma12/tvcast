@@ -117,9 +117,11 @@ def tv_status(tv, timeout):
     return status
 
 
-def has_caption_control(tv):
-    """Whether the TV takes Samsung's caption extensions to RenderingControl. Other makes don't
-    implement X_GetCaptionState or X_ControlCaption; they ignore the sec: subtitle tags instead."""
+def is_samsung(tv):
+    """Whether the TV is a Samsung, whose player has Samsung's DLNA extensions: X_GetCaptionState
+    and X_ControlCaption to show subtitle files mid-movie, and video/x-mkv for Matroska. Other
+    players (Android TV renderers such as Sony's, Philips' and Kodi) take a subtitle file only
+    with the video and expect the registered video/x-matroska."""
     return "Samsung" in tv.get("manufacturer", "")
 
 

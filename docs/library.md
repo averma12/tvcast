@@ -29,7 +29,8 @@ Movies/
 ## Subtitles
 
 Subtitle files work on Samsung TVs: `.srt`, `.ass`, `.ssa` and `.vtt`, in any language. TV Cast
-lists these files for a video:
+also sends them the ways Android TV renderers (Sony, Philips, Kodi) read them, but that is
+untested on one. TV Cast lists these files for a video:
 
 - files named like it, beside it or in `Subs/`: `Film.srt`, `Film.en.srt`, `Film.fr.forced.srt`, `Film.en.sdh.ass`;
 - files in `Subs/Film/` (episode packs);
@@ -46,7 +47,8 @@ hearing-impaired; on its own it means Hindi.
 3. otherwise, a file beside the video named exactly like it (`Film.srt`, `Film.ass`, …);
 4. otherwise, none. Choose one in the panel or with `tv subs`.
 
-**While a movie plays:** the panel's **Subtitles** menu switches files instantly. **Add file…**
+**While a movie plays:** the panel's **Subtitles** menu switches files instantly on a Samsung;
+other TVs reload the video where it is, with a pause of a few seconds. **Add file…**
 attaches any subtitle file on your Mac to the movie; TV Cast remembers it, and **Remove** detaches
 it. From the terminal:
 

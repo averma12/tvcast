@@ -38,8 +38,8 @@ class PlaybackSubtitlesTest(unittest.TestCase):
         self.app.movies, _, _ = scan_library([self.root])
         self.app.by_id = {m.id: m for m in self.app.movies}
         self.film, self.other = self.app.movies
-        tv = dict(id="test", name="Test TV", ip="192.0.2.10", manufacturer="Samsung Electronics", services={})
-        self.app.state.update_tv("test", **tv)
+        self.tv = dict(id="test", name="Test TV", ip="192.0.2.10", manufacturer="Samsung Electronics", services={})
+        self.app.state.update_tv("test", **self.tv)
         self.app.state.set("tv", "test")
         stack = contextlib.ExitStack()
         self.addCleanup(stack.close)
@@ -130,7 +130,7 @@ class PlaybackSubtitlesTest(unittest.TestCase):
         track = self.track(self.film, "mine.ass")
         self.assertEqual(added["track"], track["id"])
         self.assertEqual(self.shown(), (self.url(self.film, track), True))
-        served, ctype, movie = self.app.resolve("/subs/%s/%s.srt" % (self.film.id, track["id"]))
+        served, ctype, movie = self.app.resolve("/subs/%s/%s.srt" % (self.film.id, track["id"]), self.tv)
         self.assertEqual((ctype, movie), ("text/srt", None))
         with open(served) as f:
             self.assertIn("Mine", f.read())
@@ -143,8 +143,51 @@ class PlaybackSubtitlesTest(unittest.TestCase):
 
     def test_only_a_movies_own_tracks_are_served(self):
         german = self.track(self.other, "German")
-        self.assertIsNone(self.app.resolve("/subs/%s/%s.srt" % (self.film.id, german["id"])))
-        self.assertEqual(self.app.resolve("/subs/%s/%s.srt" % (self.other.id, german["id"]))[0], german["path"])
+        self.assertIsNone(self.app.resolve("/subs/%s/%s.srt" % (self.film.id, german["id"]), self.tv))
+        self.assertEqual(self.app.resolve("/subs/%s/%s.srt" % (self.other.id, german["id"]), self.tv)[0], german["path"])
+
+    def didl(self, call=-1):
+        return [c for c in self.transport.call_args_list if c[0][1] == "SetAVTransportURI"][call][1]["CurrentURIMetaData"]
+
+    def test_samsung_requests_carry_no_pv_attributes(self):
+        self.app.open_movie(self.film.id)
+        self.assertNotIn("pv:", self.didl())
+
+    def test_other_players_get_the_file_as_pv_attributes_too(self):
+        self.app.state.update_tv("test", manufacturer="Sony Corporation")
+        self.app.open_movie(self.film.id)
+        url = self.url(self.film, self.track(self.film, "Film.srt"))
+        self.assertIn('xmlns:pv="http://www.pv.com/pvns/"', self.didl())
+        self.assertIn('pv:subtitleFileType="SRT" pv:subtitleFileUri="%s"' % url, self.didl())
+        self.assertIn('<res protocolInfo="http-get:*:text/srt:*">%s</res>' % url, self.didl())
+        self.set_caption.assert_not_called()  # Samsung's caption control only
+
+    def test_other_players_switch_by_reloading_where_the_video_is(self):
+        self.app.state.update_tv("test", manufacturer="Sony Corporation")
+        self.app.control("queue_add", {"id": self.other.id})
+        self.app.open_movie(self.film.id)
+        first = self.app.current
+        status = {"state": "PLAYING", "position": 754.6, "duration": 6000, "uri": first.media_url}
+        with mock.patch.object(appmod, "transport_status", return_value=status):
+            self.app.control("subtitles", {"track": "french"})
+            reloads = len(self.transport.call_args_list)
+            self.app.control("subtitles", {"track": "french"})  # already showing: no reload
+        self.assertEqual(len(self.transport.call_args_list), reloads)
+        self.assertIsNot(self.app.current, first)  # so the monitor treats it as a fresh load
+        self.assertEqual(self.app.current.subtitle["label"], "French")
+        self.assertIn(self.url(self.film, self.track(self.film, "French")), self.didl())
+        self.assertIn(mock.call(mock.ANY, "Seek", Unit="REL_TIME", Target="0:12:34"), self.transport.call_args_list)
+        self.assertEqual([item["id"] for item in self.app.state.get("queue")], [self.other.id])
+        self.set_caption.assert_not_called()
+        with mock.patch.object(appmod, "transport_status", return_value=status):
+            self.app.control("subtitles", {"track": "off"})
+            self.app.control("subtitles", {"track": "on"})
+        self.assertEqual(self.app.current.subtitle["label"], "French")
+
+    def test_matroska_type_depends_on_the_tv(self):
+        mkv = mock.Mock(ext=".mkv")
+        self.assertEqual(appmod.video_type(mkv, self.tv), "video/x-mkv")
+        self.assertEqual(appmod.video_type(mkv, dict(self.tv, manufacturer="Sony Corporation")), "video/x-matroska")
 
     def test_embedded_tracks_come_from_the_probe_and_old_probes_are_redone(self):
         stamp = {"size": self.film.size, "mtime": self.film.mtime}

@@ -69,8 +69,20 @@ doesn't lose the TV or its pairing.
   failed requests can be retried. A playback lock serializes starts, stops and TV selection with
   the monitor's queue advancement; status and queue edits remain responsive during TV requests.
 - **Samsung extras.** The `CaptionInfo.sec` header (the TV asks for it with
-  `getcaptionInfo.sec: 1`) and `sec:` tags attach subtitles; other TVs ignore them. MKV files go
-  out as `video/x-mkv`. Subtitles need an explicit "enable" after loading.
+  `getcaptionInfo.sec: 1`) and `sec:` tags attach subtitles. MKV files go out to Samsungs as
+  `video/x-mkv`, and to other TVs as the registered `video/x-matroska`. Subtitles need an explicit
+  "enable" after loading.
+- **Subtitle files on Android TVs (untested on one).** DLNA has no subtitle standard, so the
+  chosen file goes out every common way, after what Universal Media Server's renderer profiles
+  and Kodi's source show:
+  - a `text/srt` `res`, which Kodi's and BubbleUPnP's renderers list as a track;
+  - the Samsung tags and header, which Philips Android TVs read;
+  - `pv:subtitleFileUri`/`pv:subtitleFileType` on the video's `res`, which UMS sends to Sony and
+    others. Samsungs don't get these, so their requests stay as tested.
+
+  These players take a file only with the video, so switching loads the video again at its
+  position. A fresh `Playback` replaces the current one, so the monitor doesn't read the reload's
+  brief stop as the movie ending.
 - **One subtitle file per load, any file after.** Measured on a 2021 Samsung (AU7500):
   - The player registers only the first `CaptionInfoEx` it gets, so only the chosen file goes out.
   - `X_ControlCaption Enable` with any caption URL, even one never sent, fetches and draws it at

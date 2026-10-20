@@ -75,7 +75,7 @@ class StreamHandler(BaseHTTPRequestHandler):
         if tv is None or self.client_address[0] != tv["ip"]:
             self.send_error(403)
             return
-        entry = self.app.resolve(self.path)
+        entry = self.app.resolve(self.path, tv)
         if entry is None:
             self.send_error(404)
             return

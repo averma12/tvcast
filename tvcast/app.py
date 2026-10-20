@@ -21,8 +21,7 @@ from .subtitles import (
     IMAGE_CODECS, LANGUAGE_TOKENS, SUBTITLE_TYPES, distinct_labels, embedded_label, prepare, subtitle_track,
 )
 from .upnp import (
-    DLNA_FEATURES, captions, has_caption_control, hms, log, rendering, set_caption, transport, transport_status,
-    tv_status,
+    DLNA_FEATURES, captions, hms, is_samsung, log, rendering, set_caption, transport, transport_status, tv_status,
 )
 
 STATUS_TIMEOUT = 2  # panel status polls; an off TV would otherwise stall the panel for SOAP_TIMEOUT
@@ -70,6 +69,11 @@ def move_refused(known, ip):
     if samsung.fingerprint(ip) != known["remote_cert"]:
         return "its certificate doesn't match the paired TV"
     return None
+
+
+def video_type(movie, tv):
+    """The MIME type announced to tv for movie: Samsung players want Matroska as video/x-mkv."""
+    return "video/x-mkv" if movie.ext == ".mkv" and is_samsung(tv) else VIDEO_TYPES[movie.ext]
 
 
 def tv_list(tvs):
@@ -389,8 +393,8 @@ class App:
         log("library folder removed: %s" % path)
         self.request_scan()
 
-    def resolve(self, url_path):
-        """(file path, content type, movie or None) behind a stream URL, or None.
+    def resolve(self, url_path, tv):
+        """(file path, content type, movie or None) behind a stream URL fetched by tv, or None.
 
         Every library video stays reachable by its id, so a TV that keeps playing across a
         restart of this service never hits a 404."""
@@ -399,7 +403,7 @@ class App:
         if not movie:
             return None
         if m[1] == "media" and m[3] == movie.ext:
-            return movie.path, VIDEO_TYPES[movie.ext], movie
+            return movie.path, video_type(movie, tv), movie
         track = m[1] == "subs" and next((t for t in self.subtitle_tracks(movie) if t["id"] == m[4]), None)
         if not track or track["missing"]:
             return None
@@ -456,15 +460,16 @@ class App:
     def switch_subtitles(self, choice):
         """Show another subtitle file on the playing movie, or none: choice is "off", "on" (the
         file shown last, else the default) or anything match_track takes. The choice is
-        remembered for the movie. Tracks inside the video are left to the TV's own menu: Disable
-        doesn't hide them, but Enable replaces them."""
+        remembered for the movie. Tracks inside the video are left to the TV's own menu: on a
+        Samsung, Disable doesn't hide them, but Enable replaces them.
+
+        A Samsung switches files in place. Other players take a file only with the video, so the
+        video loads again at its current position, with a pause of a few seconds."""
         with self.playback_lock:
             with self.lock:
                 pb = self.current
             if pb is None:
                 raise ValueError("no video from this library is playing")
-            if not has_caption_control(pb.tv):
-                raise RuntimeError("TV %s can't switch subtitles from TV Cast; use its own remote" % pb.tv["name"])
             tracks = self.subtitle_tracks(pb.movie)
             if choice == "off":
                 track = None
@@ -479,6 +484,20 @@ class App:
                     raise ValueError("choose which subtitles to show:\n  %s" % "\n  ".join(t["label"] for t in tracks))
             else:
                 track = match_track(tracks, choice)
+            if not is_samsung(pb.tv):
+                choice = track["id"] if track else "off"
+                if choice == (pb.subtitle["id"] if pb.subtitle else "off"):
+                    self.remember_subtitle(pb.movie, track)
+                    return
+                position = transport_status(pb.tv)["position"]
+                if position is None:
+                    position = pb.position or 0
+                previous = pb.subtitle or pb.previous_subtitle
+                self._open_movie(pb.movie.id, False, choice, at=position)
+                with self.lock:
+                    if self.current is not None and self.current is not pb:
+                        self.current.previous_subtitle = previous
+                return
             if track is None:
                 if pb.subtitle is not None:
                     set_caption(pb.tv, False, pb.media_url, pb.subtitle_url(pb.subtitle), pb.movie.title)
@@ -524,7 +543,7 @@ class App:
         log("subtitles %s added to %s" % (path, movie.title))
         with self.lock:
             pb = self.current
-        if pb is not None and pb.movie.id == movie.id and has_caption_control(pb.tv):
+        if pb is not None and pb.movie.id == movie.id:
             self.switch_subtitles(track["id"])
         else:
             self.remember_subtitle(movie, track)
@@ -551,7 +570,7 @@ class App:
     def subtitle_status(self, pb):
         info = self.probe_info(pb.movie) or {}
         return {
-            "control": has_caption_control(pb.tv),
+            "live": is_samsung(pb.tv),  # switches in place; otherwise by reloading the video
             "selected": pb.subtitle["id"] if pb.subtitle else None,
             "tracks": [
                 {k: t[k] for k in ("id", "label", "lang", "added", "missing")}
@@ -587,16 +606,19 @@ class App:
         with self.playback_lock:
             self._open_movie(movie_id, from_start, subtitle)
 
-    def _open_movie(self, movie_id, from_start, subtitle):
+    def _open_movie(self, movie_id, from_start, subtitle, at=None):
+        """Load a movie on the selected TV from its resume point, or from position at when set."""
         movie = self.lookup(movie_id)
         if movie is None or movie.root not in self.state.get("libraries"):
             raise ValueError("no video with id %r in the library" % movie_id)
         if not os.path.isfile(movie.path):
             raise ValueError("%s is unavailable; reconnect its folder and rescan" % movie.title)
         tv = self.require_tv()
-        start = None if from_start else self.state.movie(movie.path).get("position", 0)
-        if start is not None and start < RESUME_MIN:
-            start = None
+        if at is None:
+            start = None if from_start else self.state.movie(movie.path).get("position", 0)
+            seek = None if start is None or start < RESUME_MIN else max(0, start - RESUME_REWIND)
+        else:
+            seek = at
         tracks = self.subtitle_tracks(movie)
         if subtitle is not None:  # named by the user: a problem with it is an error
             track = None if subtitle == "off" else match_track(tracks, subtitle)
@@ -619,9 +641,9 @@ class App:
             self.keep_awake(True)
         if previous is not None:
             self.save_progress(previous)
-        log("opening %s on %s%s" % (movie.title, tv["name"], " at " + hms(start) if start else ""))
+        log("opening %s on %s%s" % (movie.title, tv["name"], " at " + hms(seek) if seek else ""))
         try:
-            self.load(pb, None if start is None else max(0, start - RESUME_REWIND))
+            self.load(pb, seek)
         except BaseException:
             with self.lock:
                 if self.current is pb:
@@ -631,33 +653,43 @@ class App:
         self.consume_queued(movie.id)
 
     def load(self, pb, start):
-        sub_xml = ""
+        # DLNA has no standard for subtitle files, so the chosen file goes out every common way:
+        # - a res of type text/srt, which Kodi and BubbleUPnP's renderer list as a subtitle track;
+        # - Samsung's sec: tags and CaptionInfo.sec header, which Philips Android TVs also read;
+        # - pv: attributes on the video's res, which Universal Media Server sends to Sony and
+        #   other non-Samsung renderers. Samsung TVs don't get these, so their requests stay as
+        #   tested.
+        # A Samsung player registers only the first file, so only the chosen one goes out;
+        # set_caption or a reload switches to others later.
+        sub_xml = pv_attrs = pv_ns = ""
         if pb.subtitle:
-            # The sec: tags are Samsung's way to attach external subtitles; other TVs ignore them.
-            # A Samsung player registers only the first file, so only the chosen track goes out;
-            # set_caption switches to others later.
+            url = pb.subtitle_url(pb.subtitle)
             sub_xml = (
                 '<res protocolInfo="http-get:*:text/srt:*">%s</res>'
                 '<sec:CaptionInfoEx sec:type="srt">%s</sec:CaptionInfoEx>'
-                '<sec:CaptionInfo sec:type="srt">%s</sec:CaptionInfo>' % ((pb.subtitle_url(pb.subtitle),) * 3)
+                '<sec:CaptionInfo sec:type="srt">%s</sec:CaptionInfo>' % ((url,) * 3)
             )
+            if not is_samsung(pb.tv):
+                pv_ns = ' xmlns:pv="http://www.pv.com/pvns/"'
+                pv_attrs = ' pv:subtitleFileType="SRT" pv:subtitleFileUri="%s"' % url
         title = pb.movie.title + (" (%d)" % pb.movie.year if pb.movie.year else "")
         didl = (
             '<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"'
             ' xmlns:dc="http://purl.org/dc/elements/1.1/"'
             ' xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"'
-            ' xmlns:sec="http://www.sec.co.kr/">'
+            ' xmlns:sec="http://www.sec.co.kr/"%s>'
             '<item id="0" parentID="-1" restricted="1"><dc:title>%s</dc:title>'
             "<upnp:class>object.item.videoItem.movie</upnp:class>"
-            '<res protocolInfo="http-get:*:%s:%s" size="%d">%s</res>%s'
+            '<res protocolInfo="http-get:*:%s:%s" size="%d"%s>%s</res>%s'
             "</item></DIDL-Lite>"
-            % (escape(title), VIDEO_TYPES[pb.movie.ext], DLNA_FEATURES, pb.movie.size, pb.media_url, sub_xml)
+            % (pv_ns, escape(title), video_type(pb.movie, pb.tv), DLNA_FEATURES, pb.movie.size, pv_attrs,
+               pb.media_url, sub_xml)
         )
         transport(pb.tv, "SetAVTransportURI", CurrentURI=pb.media_url, CurrentURIMetaData=didl)
         self.when_ready(pb.tv, "Play", Speed=1)
         if start is not None:
             self.when_ready(pb.tv, "Seek", Unit="REL_TIME", Target=hms(start))
-        if pb.subtitle and has_caption_control(pb.tv):
+        if pb.subtitle and is_samsung(pb.tv):
             try:
                 self.enable_subtitles_on_load(pb)
             except RuntimeError as e:  # the movie plays anyway; the panel can still switch them on
@@ -855,7 +887,7 @@ class App:
         # None unless a Samsung TV plays a video from this library with a subtitle file shown by
         # TV Cast and reports it; a failing vendor extension must not make the TV look unreachable.
         st["subtitles"] = None
-        if pb is not None and pb.subtitle and has_caption_control(tv):
+        if pb is not None and pb.subtitle and is_samsung(tv):
             with contextlib.suppress(RuntimeError):
                 available, enabled = captions(tv)
                 # None when the player has no subtitle file; the reported on/off can be stale.

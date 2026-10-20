@@ -66,8 +66,8 @@ The panel shows the TV's volume, mute state and current supported app. Use **App
 | `tv pause` · `tv play` · `tv stop` | |
 | `tv seek 1:05:00` | jump to a time |
 | `tv volume 20` · `tv mute on` | |
-| `tv subs` · `tv subs french` · `tv subs off` | list subtitles, switch language or turn them off (Samsung) |
-| `tv subs --add ~/Downloads/film.srt` | show your own subtitle file with the playing movie (Samsung) |
+| `tv subs` · `tv subs french` · `tv subs off` | list subtitles, switch language or turn them off |
+| `tv subs --add ~/Downloads/film.srt` | show your own subtitle file with the playing movie |
 | `tv key home` · `tv key down down enter` | press remote buttons (Samsung) |
 | `tv status` | what's playing, and where |
 | `tv tvs --find` · `tv use 2` | find TVs, switch to another TV |
@@ -88,7 +88,7 @@ Before removing the package, run `tv uninstall`, then `uv tool uninstall tvcast`
 | | Any DLNA TV | Samsung (2016 or newer) |
 |---|---|---|
 | Play, pause, seek, volume, resume | ✓ | ✓ |
-| Subtitle files (`.srt`, `.ass`, `.ssa`, `.vtt`) | if the TV supports them | ✓, any language, switch while playing |
+| Subtitle files (`.srt`, `.ass`, `.ssa`, `.vtt`) | if the TV supports them; switching reloads the video | ✓, any language, switch while playing |
 | Subtitles inside the video | if the TV supports them | ✓, from the TV's own menu |
 | Remote buttons, apps, typing | – | ✓ |
 

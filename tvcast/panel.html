@@ -436,11 +436,12 @@ function renderStatus() {
 // The track shown, or 'off'; the TV's own report wins, since its remote can switch them off too.
 const shownSubtitle = subs => subs.selected && st.tv?.subtitles !== false ? subs.selected : 'off';
 function renderSubtitles(subs) {
-  $('subnote').textContent = subs?.embedded.length
-    ? 'In the video file: ' + subs.embedded.map(t => t.label + (t.image ? ' (Blu-ray image subtitles; the TV may not show them)' : '')).join(', ') + ". The TV shows these itself; switch or hide them with its own subtitle menu."
-    : '';
-  $('subctl').hidden = !subs?.control;
-  if (!subs?.control) return;
+  $('subnote').textContent = !subs ? '' : [
+    subs.embedded.length ? 'In the video file: ' + subs.embedded.map(t => t.label + (t.image ? ' (Blu-ray image subtitles; the TV may not show them)' : '')).join(', ') + ". The TV shows these itself; switch or hide them with its own subtitle menu." : '',
+    subs.live ? '' : 'Switching subtitles reloads the video where it is, with a short pause.',
+  ].filter(Boolean).join(' ');
+  $('subctl').hidden = !subs;
+  if (!subs) return;
   const value = shownSubtitle(subs);
   $('subRemove').hidden = !subs.tracks.find(t => t.id === value)?.added;
   $('subAdd').disabled = choosingSubs;
@@ -709,7 +710,7 @@ document.addEventListener('keydown', e => {
   else if (e.target.closest('button, summary, a')) return;
   else if (e.key === ' ') { if (ownsPlayback()) { e.preventDefault(); togglePlay(); } }
   else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { if (ownsPlayback()) { e.preventDefault(); skip(e.key === 'ArrowLeft' ? -10 : 10); } }
-  else if (e.key.toLowerCase() === 'c' && ownsPlayback() && st.now.subtitles.control && st.now.subtitles.tracks.length) act('subtitles', {track:shownSubtitle(st.now.subtitles) === 'off' ? 'on' : 'off'});
+  else if (e.key.toLowerCase() === 'c' && ownsPlayback() && st.now.subtitles.tracks.length) act('subtitles', {track:shownSubtitle(st.now.subtitles) === 'off' ? 'on' : 'off'});
 });
 poll();
 </script>

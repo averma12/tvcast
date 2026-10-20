@@ -10,10 +10,10 @@ import subprocess
 from .subtitles import find_subtitles
 
 # Video files the library picks up, with the MIME type announced to the TV. MP4 and Matroska
-# (HEVC video, AAC audio) are verified on a 2021 Samsung Tizen TV; Matroska goes out as
-# video/x-mkv, the type minidlna uses for Samsung TVs.
+# (HEVC video, AAC audio) are verified on a 2021 Samsung Tizen TV, where Matroska goes out as
+# video/x-mkv instead (see video_type in app.py), the type minidlna uses for Samsung TVs.
 VIDEO_TYPES = {
-    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".mkv": "video/x-mkv",
+    ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
     ".avi": "video/x-msvideo", ".webm": "video/webm", ".ts": "video/mp2t", ".m2ts": "video/mp2t",
     ".mpg": "video/mpeg", ".mpeg": "video/mpeg", ".wmv": "video/x-ms-wmv",
 }
