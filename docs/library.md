@@ -29,8 +29,9 @@ Movies/
 ## Subtitles
 
 Subtitle files work on Samsung TVs: `.srt`, `.ass`, `.ssa` and `.vtt`, in any language. TV Cast
-also sends them the ways Android TV renderers (Sony, Philips, Kodi) read them, but that is
-untested on one. TV Cast lists these files for a video:
+also sends them the ways Android TV renderers (Sony, Philips, Kodi) read them. Some TVs show
+none of them; for those TV Cast burns the subtitles into the picture (see
+[TVs that show no subtitle files](#tvs-that-show-no-subtitle-files)). TV Cast lists these files for a video:
 
 - files named like it, beside it or in `Subs/`: `Film.srt`, `Film.en.srt`, `Film.fr.forced.srt`, `Film.en.sdh.ass`;
 - files in `Subs/Film/` (episode packs);
@@ -74,6 +75,41 @@ ffmpeg -i in.mkv -filter_complex "[0:v][0:s:0]overlay[v]" -map "[v]" -map 0:a:0 
 
 Text files in other encodings (Windows-1252, UTF-16) work. If a file shows the wrong
 characters, save it as UTF-8.
+
+### TVs that show no subtitle files
+
+Some TVs' players show no subtitle file in any form TV Cast can send, nor the tracks inside
+videos. Tested: a Philips Smart 4 Google TV, whose renderer is "Skyworth Media Renderer". On
+such TVs TV Cast draws the chosen subtitle file into the picture. That re-encodes the video
+(HEVC, on the Mac's media engine), so it needs `ffmpeg` (`brew install ffmpeg`) and the Command
+Line Tools. Dolby Vision becomes HDR10.
+
+`tv tvs` shows how each TV gets subtitles. TV Cast picks it for known TVs; change it with
+`tv subs --mode auto|file|burn` or **Subtitles on this TV** in the panel.
+
+There are two ways to play burned-in subtitles, both seekable with the TV's remote:
+
+- **HLS** starts in seconds. TV Cast encodes the movie in 6-second segments as the TV asks for
+  them, a little ahead of where it plays; a seek waits a few seconds for its segment. The Mac
+  keeps encoding while you watch, and the audio is re-encoded as Dolby Digital Plus 5.1.
+- **Copy** is the whole movie written once, in the background, in about a third of its running
+  time. It then plays like any file: no waiting and no work for the Mac. The audio is kept, except
+  TrueHD and DTS, which MP4 or most TVs can't take; those become Dolby Digital Plus. Copies are
+  about as big as the movie and stay in `~/Movies/TV Cast subtitles` (which the library skips)
+  until you delete them. A copy cut short when TV Cast stops is deleted the next time it starts.
+
+`tv open` plays the copy when there is one, otherwise HLS:
+
+```sh
+tv burn dune                # make a copy in the background; tv status shows how far
+tv open dune                # the copy if it's ready, else HLS
+tv open dune --hls          # HLS even if there is a copy
+tv open dune --copy         # the copy only (starts making one if there's none)
+tv burn --list              # copies and the space they take
+tv burn --delete dune       # delete the copy; the movie stays
+```
+
+In the panel, **Make copy** and **Delete copy** sit under the subtitles while a movie plays.
 
 ## Resume and queue
 

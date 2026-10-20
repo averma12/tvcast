@@ -8,7 +8,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler
 
-from .upnp import DLNA_FEATURES
+from .upnp import DLNA_FEATURES, log
 
 CHUNK = 256 * 1024
 RATE_WINDOW = 10  # seconds of history behind the panel's transfer-rate figure
@@ -75,6 +75,9 @@ class StreamHandler(BaseHTTPRequestHandler):
         if tv is None or self.client_address[0] != tv["ip"]:
             self.send_error(403)
             return
+        if self.path.startswith("/hls/"):
+            self._hls(send_body)
+            return
         entry = self.app.resolve(self.path, tv)
         if entry is None:
             self.send_error(404)
@@ -139,9 +142,41 @@ class StreamHandler(BaseHTTPRequestHandler):
         finally:
             self.app.stats.transfer(-1)
 
+    def _hls(self, send_body):
+        """Serve /hls/<movie>/<subtitle file>/index.m3u8 and its segments <n>.ts: the movie with
+        that subtitle file burned in, each segment encoded the first time the TV asks for it."""
+        try:
+            entry = self.app.hls_file(self.path)
+        except (RuntimeError, ValueError, OSError) as e:
+            log("HLS %s failed: %s" % (self.path, e))
+            self.send_error(503, str(e)[:200])
+            return
+        if entry is None:
+            self.send_error(404)
+            return
+        self.app.stats.request()
+        body, ctype = entry
+        if not isinstance(body, bytes):
+            with open(body, "rb") as f:
+                body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if not send_body:
+            return
+        self.app.stats.transfer(1)
+        try:
+            self.wfile.write(body)
+            self.app.stats.add(len(body))
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True  # the TV moved on, e.g. after a seek
+        finally:
+            self.app.stats.transfer(-1)
+
     def log_request(self, code="-", size="-"):
         # The TV fetches video in many ranges; only subtitle fetches are worth a log line.
-        if not self.path.startswith("/media/"):
+        if not self.path.startswith(("/media/", "/burned/", "/hls/")):
             super().log_request(code, size)
 
 

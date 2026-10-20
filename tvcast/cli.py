@@ -95,7 +95,15 @@ def show_status(port):
             "%s / %s" % (hms(s["position"]), hms(s["duration"]))]
     if s["volume"] is not None:
         line.append("volume %d%s" % (s["volume"], " (muted)" if s["muted"] else ""))
+    drawn = st["now"] and st["now"]["subtitles"].get("drawn")
+    if drawn:
+        line.append("· subtitles burned in (%s)" % ("HLS" if drawn == "hls" else "copy"))
     print("  ".join(line))
+    for job in st.get("burns", []):
+        state = ("failed: %s" % job["error"] if job["error"]
+                 else "%d%%%s" % (job["progress"] * 100, ", " + job["eta"] if job.get("eta") else "") if job["running"]
+                 else "ready")
+        print("Copy of %s with %s burned in: %s" % (job["title"], job["subtitle"], state))
 
 
 def list_tvs(port, find):
@@ -106,7 +114,9 @@ def list_tvs(port, find):
     if not st["tvs"]:
         print('No TVs known yet; search the network with "tv tvs --find"')
     for i, tv in enumerate(st["tvs"], 1):
-        fields = [tv["name"], tv["model"], tv["ip"], "Samsung remote" if tv["remote"] else ""]
+        mode = "subtitles %s%s" % ("burned in" if tv["subtitles"] == "burn" else "as files",
+                                   " (auto)" if tv["subtitle_mode"] == "auto" else "")
+        fields = [tv["name"], tv["model"], tv["ip"], "Samsung remote" if tv["remote"] else "", mode]
         print("%s %d. %s" % ("*" if tv["id"] == st["selected"] else " ", i, "  ".join(f for f in fields if f)))
 
 
@@ -122,7 +132,7 @@ def use_tv(port, which):
     print("Selected %s (%s)" % (tv["name"], tv["ip"]))
 
 
-def open_video(port, query, from_start, subs):
+def find_video(port, query):
     # The daemon rescans only when the panel page loads or a folder changes, so ask for one to
     # find videos added since.
     api(port, "rescan", {})
@@ -133,15 +143,55 @@ def open_video(port, query, from_start, subs):
         st = api(port, "status")
     if not st["library"] and st["scanning"]:
         raise SystemExit("the library is still being scanned; try again in a moment")
-    movie = pick(query, [(video_label(m), m) for m in st["library"]], "video")
+    return pick(query, [(video_label(m), m) for m in st["library"]], "video")
+
+
+def subtitle_choice(port, movie, subs):
+    """A --subs value as the daemon takes it: a file on this Mac is attached to movie first."""
+    if subs is not None and os.path.isfile(os.path.expanduser(subs)):
+        path = os.path.abspath(os.path.expanduser(subs))
+        return api(port, "add_subtitles", {"id": movie["id"], "path": path})["track"]
+    return subs
+
+
+def burn_video(port, query, subs, list_copies=False, delete=False):
+    if list_copies:
+        copies = api(port, "status")["copies"]
+        for c in copies:
+            print("%-40s %6.1f GB  %s" % (c["title"], c["size"] / 1e9, c["path"]))
+        total = sum(c["size"] for c in copies)
+        print("%d cop%s, %.1f GB" % (len(copies), "y" if len(copies) == 1 else "ies", total / 1e9) if copies
+              else "No copies with burned-in subtitles")
+        return
+    if not query:
+        raise SystemExit("name a video, e.g. tv burn dune")
+    movie = find_video(port, query)
+    if delete:
+        result = api(port, "delete_copy", {"id": movie["id"]})
+        print("Deleted the copy of %s (%.1f GB)" % (video_label(movie), result["bytes"] / 1e9))
+        return
+    body = {"id": movie["id"]}
+    if subs is not None:
+        body["subtitle"] = subtitle_choice(port, movie, subs)
+    result = api(port, "burn", body)
+    if result.get("ready"):
+        print("%s already has these subtitles burned in" % video_label(movie))
+    elif result.get("running"):
+        print("Already burning subtitles into %s; tv status shows how far" % video_label(movie))
+    else:
+        print("Burning subtitles into %s in the background (about a third of its running time);"
+              " tv status shows how far" % video_label(movie))
+
+
+def open_video(port, query, from_start, subs, burn=None):
+    movie = find_video(port, query)
     if movie["problem"]:
         print("warning: %s; trying anyway" % movie["problem"], file=sys.stderr)
     body = {"id": movie["id"], "from_start": from_start}
-    if subs is not None and os.path.isfile(os.path.expanduser(subs)):
-        path = os.path.abspath(os.path.expanduser(subs))
-        body["subtitle"] = api(port, "add_subtitles", {"id": movie["id"], "path": path})["track"]
-    elif subs is not None:
-        body["subtitle"] = subs
+    if burn:
+        body["burn"] = burn
+    if subs is not None:
+        body["subtitle"] = subtitle_choice(port, movie, subs)
     print("Opening %s" % video_label(movie))
     api(port, "open", body)
 
@@ -154,7 +204,13 @@ def playing_subtitles(port):
     return st, st["now"]["subtitles"]
 
 
-def subtitles(port, choice, add, remove):
+def subtitles(port, choice, add, remove, mode=None):
+    if mode:
+        result = api(port, "subtitle_mode", {"mode": mode})
+        print("The selected TV shows subtitle files %s%s" % (
+            "burned into the picture" if result["subtitles"] == "burn" else "as files its player draws",
+            " (chosen for this TV automatically)" if mode == "auto" else ""))
+        return
     if add:
         print("Showing %s" % api(port, "add_subtitles", {"path": os.path.abspath(os.path.expanduser(add))})["label"])
         return
@@ -185,6 +241,10 @@ def subtitles(port, choice, add, remove):
             print("       %s%s" % (t["label"], note))
     if not subs["tracks"] and not subs["embedded"]:
         print('No subtitles; add a file with "tv subs --add FILE"')
+    if subs.get("drawn") == "hls":
+        print("Burned in as the TV plays (HLS); tv burn makes a copy that needs no encoding while playing")
+    elif subs.get("drawn") == "copy":
+        print("Burned in (playing the finished copy)")
 
 
 def key_name(name):
@@ -264,6 +324,11 @@ def main():
     c.add_argument("--from-start", action="store_true", help="ignore the resume point")
     c.add_argument("--subs", metavar="LANGUAGE|FILE",
                    help="subtitles to show: a language, part of a track name, off, or a subtitle file")
+    g = c.add_mutually_exclusive_group()
+    g.add_argument("--hls", dest="burn", action="store_const", const="hls",
+                   help="on a TV that burns subtitles in: encode as it plays, even if a copy exists")
+    g.add_argument("--copy", dest="burn", action="store_const", const="copy",
+                   help="on a TV that burns subtitles in: play the finished copy (starts making one if needed)")
     command("play", "resume playback")
     command("pause", "pause playback")
     command("stop", "stop playback")
@@ -279,6 +344,16 @@ def main():
     g = c.add_mutually_exclusive_group()
     g.add_argument("--add", metavar="FILE", help="show a subtitle file (.srt, .ass, .ssa, .vtt) from this Mac")
     g.add_argument("--remove", metavar="NUMBER|NAME", help="detach a subtitle file added with --add or the panel")
+    g.add_argument("--mode", choices=["auto", "file", "burn"],
+                   help="how the selected TV shows subtitle files: sent as files for its player to draw, or"
+                        " burned into the picture for TVs whose players show none (auto picks per TV)")
+    c = command("burn", "make a copy of a video with a subtitle file burned in, in the background, for TVs"
+                        " that burn subtitles in; tv open then plays it with no encoding. Copies stay until deleted")
+    c.add_argument("query", nargs="*", metavar="QUERY")
+    c.add_argument("--subs", metavar="LANGUAGE|FILE", help="the subtitle file to burn in (default: the usual one)")
+    g = c.add_mutually_exclusive_group()
+    g.add_argument("--list", action="store_true", help="list the copies and the space they take")
+    g.add_argument("--delete", action="store_true", help="delete the video's copy")
     c = command("key", "press remote keys on a Samsung TV, e.g. home, KEY_VOLUP")
     c.add_argument("names", nargs="+", metavar="NAME")
     c = command("daemon", "run the panel, stream server and playback tracking in the foreground")
@@ -312,7 +387,7 @@ def main():
         api(args.panel_port, "pair", {})
         print("Paired")
     elif args.cmd == "open":
-        open_video(args.panel_port, " ".join(args.query), args.from_start, args.subs)
+        open_video(args.panel_port, " ".join(args.query), args.from_start, args.subs, args.burn)
     elif args.cmd in ("play", "pause", "stop"):
         api(args.panel_port, args.cmd, {})
     elif args.cmd == "seek":
@@ -325,8 +400,10 @@ def main():
     elif args.cmd == "mute":
         api(args.panel_port, "mute", {"on": args.on == "on"})
     elif args.cmd == "subs":
-        if args.choice and (args.add or args.remove):
-            p.error("subs takes a choice or --add/--remove, not both")
-        subtitles(args.panel_port, args.choice, args.add, args.remove)
+        if args.choice and (args.add or args.remove or args.mode):
+            p.error("subs takes a choice or --add/--remove/--mode, not both")
+        subtitles(args.panel_port, args.choice, args.add, args.remove, args.mode)
+    elif args.cmd == "burn":
+        burn_video(args.panel_port, " ".join(args.query), args.subs, args.list, args.delete)
     elif args.cmd == "key":
         api(args.panel_port, "keys", {"keys": [key_name(n) for n in args.names]})

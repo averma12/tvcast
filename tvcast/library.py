@@ -23,6 +23,10 @@ VIDEO_TYPES = {
 TV_VIDEO_CODECS = {"h264", "hevc", "mpeg4", "mpeg2video", "vp8", "vp9", "vc1", "wmv3"}
 TV_AUDIO_CODECS = {"aac", "ac3", "eac3", "mp3", "mp2", "flac", "opus", "vorbis", "wmav2", "pcm_s16le", "pcm_s24le"}
 COVER_ART_CODECS = {"mjpeg", "png"}  # attached pictures that ffprobe lists as video streams
+# Copies of videos with subtitles burned in (burn.py). They are about as big as their source, so
+# they live with the user's movies rather than in a cache macOS may purge; the library scan skips
+# the folder, since the default library root ~/Movies contains it.
+BURNED_DIR = os.path.expanduser("~/Movies/TV Cast subtitles")
 SKIP_DIR_SUFFIXES = (".app", ".bundle", ".fcpbundle", ".photoslibrary", ".imovielibrary", ".tvlibrary", ".musiclibrary")
 # Release subfolders that hold bonus material, tracker notes or subtitles rather than the movie.
 EXTRAS_DIRS = {
@@ -95,6 +99,7 @@ def scan_library(roots):
                 d for d in dirnames
                 if not d.startswith(".") and not SAMPLE.search(d) and d.lower() not in EXTRAS_DIRS
                 and not d.lower().endswith(SKIP_DIR_SUFFIXES)
+                and os.path.join(dirpath, d) != BURNED_DIR
             )
             videos = [
                 f for f in filenames
