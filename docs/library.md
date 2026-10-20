@@ -93,8 +93,10 @@ There are two ways to play burned-in subtitles, both seekable with the TV's remo
   them, a little ahead of where it plays; a seek waits a few seconds for its segment. The Mac
   keeps encoding while you watch, and the audio is re-encoded as Dolby Digital Plus 5.1.
 - **Copy** is the whole movie written once, in the background, in about a third of its running
-  time. It then plays like any file: no waiting and no work for the Mac. Copies are about as big
-  as the movie and stay in `~/Movies/TV Cast subtitles` until you delete them.
+  time. It then plays like any file: no waiting and no work for the Mac. The audio is kept, except
+  TrueHD and DTS, which MP4 or most TVs can't take; those become Dolby Digital Plus. Copies are
+  about as big as the movie and stay in `~/Movies/TV Cast subtitles` (which the library skips)
+  until you delete them. A copy cut short when TV Cast stops is deleted the next time it starts.
 
 `tv open` plays the copy when there is one, otherwise HLS:
 

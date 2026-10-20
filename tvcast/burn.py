@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 
-from .library import BURNED_DIR, FFPROBE
+from .library import BURNED_DIR, COVER_ART_CODECS, FFPROBE
 from .subtitles import decode
 
 FFMPEG = shutil.which("ffmpeg", path=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin")
@@ -38,7 +38,10 @@ AHEAD = 10  # segments prepared beyond the one the TV asked for
 WORKERS = 2  # segment encodes at a time; the media engine keeps up with two 4K streams
 # Added to every segment's timestamps, so none starts at 0, which ffmpeg treats as "no offset".
 TS_BASE = 10.0
-SEGMENT_AUDIO = ("-c:a", "eac3", "-b:a", "640k")  # Dolby Digital Plus, as most sources and TVs use
+EAC3_AUDIO = ("-c:a", "eac3", "-b:a", "640k")  # Dolby Digital Plus, as most sources and TVs use
+# Audio a burned-in copy keeps as it is: what MP4 holds and TVs play. The rest (TrueHD, the usual
+# main track of Blu-ray remuxes, which MP4 refuses; DTS, which recent TVs dropped) becomes E-AC-3.
+COPY_AUDIO = {"aac", "ac3", "eac3", "mp3", "mp2", "flac", "opus", "alac"}
 
 
 def available():
@@ -88,17 +91,20 @@ def parse_srt(text):
 
 
 def video_info(path):
-    """Size, pixel format, colour tags and duration of the first video stream."""
+    """Size, pixel format, colour tags and duration of the first video stream, and the codec of
+    the first audio stream (None without one)."""
     r = subprocess.run(
-        [FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries",
-         "stream=width,height,pix_fmt,color_transfer,color_primaries,color_space:format=duration", "-of", "json", path],
+        [FFPROBE, "-v", "error", "-show_entries", "stream=codec_type,codec_name,width,height,pix_fmt,"
+         "color_transfer,color_primaries,color_space:format=duration", "-of", "json", path],
         capture_output=True, text=True, timeout=60, check=True)
     data = json.loads(r.stdout)
-    s = data["streams"][0]
+    streams = data.get("streams", [])
+    s = next(s for s in streams if s.get("codec_type") == "video" and s.get("codec_name") not in COVER_ART_CODECS)
+    audio = next((a.get("codec_name") for a in streams if a.get("codec_type") == "audio"), None)
     return {
         "width": s["width"], "height": s["height"], "ten_bit": "10" in s.get("pix_fmt", ""),
         "transfer": s.get("color_transfer"), "primaries": s.get("color_primaries"), "space": s.get("color_space"),
-        "duration": float(data.get("format", {}).get("duration") or 0) or None,
+        "duration": float(data.get("format", {}).get("duration") or 0) or None, "audio": audio,
     }
 
 
@@ -122,14 +128,16 @@ def subs_key(movie, srt):
     return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
-def burned_path(movie, srt):
-    """Where the copy of movie with subtitles srt burned in lives (it may not exist yet)."""
-    return os.path.join(BURNED_DIR, "%s-%s.mp4" % (movie.id, subs_key(movie, srt)))
+def burned_path(movie, source):
+    """Where the copy of movie with subtitle file `source` burned in lives (it may not exist yet).
+    source is the file the user chose, not its SubRip version: a converted file's name changes
+    with TV Cast's version, and the copy must outlive upgrades."""
+    return os.path.join(BURNED_DIR, "%s-%s.mp4" % (movie.id, subs_key(movie, source)))
 
 
-def burned(movie, srt):
-    """The finished copy of movie with subtitles srt burned in, or None."""
-    path = burned_path(movie, srt)
+def burned(movie, source):
+    """The finished copy of movie with subtitle file `source` burned in, or None."""
+    path = burned_path(movie, source)
     return path if os.path.isfile(path) else None
 
 
@@ -213,8 +221,9 @@ def video_args(info, audio=("-c:a", "copy")):
 def burn_command(path, sup, info, out):
     """ffmpeg arguments that write the whole movie with subtitles burned in to MP4 `out`,
     reporting progress as key=value lines (out_time_us=...) on stdout."""
+    audio = ("-c:a", "copy") if info.get("audio") in COPY_AUDIO else EAC3_AUDIO
     return ([FFMPEG, "-hide_banner", "-nostdin", "-v", "error", "-y", "-hwaccel", "videotoolbox",
-             "-i", path, "-i", sup] + video_args(info)
+             "-i", path, "-i", sup] + video_args(info, audio)
             + ["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", "-f", "mp4", out])
 
 
@@ -227,9 +236,23 @@ def segment_command(path, sup, start, duration, info, out):
     before `start`, so each segment would repeat the end of the one before. Overlapping audio
     made the Philips TV's player stall at every segment."""
     return ([FFMPEG, "-hide_banner", "-nostdin", "-v", "error", "-y", "-hwaccel", "videotoolbox",
-             "-ss", "%.3f" % start, "-i", path, "-i", sup] + video_args(info, SEGMENT_AUDIO)
+             "-ss", "%.3f" % start, "-i", path, "-i", sup] + video_args(info, EAC3_AUDIO)
             + ["-t", "%.3f" % duration, "-output_ts_offset", "%.3f" % (TS_BASE + start),
                "-muxdelay", "0", "-muxpreload", "0", "-f", "mpegts", out])
+
+
+def clean_up():
+    """Remove what a burn or HLS session left behind when TV Cast stopped mid-way: half-written
+    copies, which nothing lists or deletes, and HLS segments. Call only when none can be running."""
+    with contextlib.suppress(FileNotFoundError):
+        for name in os.listdir(BURNED_DIR):
+            if name.endswith(".part.mp4"):
+                path = os.path.join(BURNED_DIR, name)
+                size = os.path.getsize(path)
+                os.remove(path)
+                yield "deleted unfinished copy %s (%.1f GB)" % (path, size / 1e9)
+    if os.path.isdir(os.path.join(CACHE, "hls")):
+        shutil.rmtree(os.path.join(CACHE, "hls"), ignore_errors=True)
 
 
 def segment_count(duration):

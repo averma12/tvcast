@@ -80,10 +80,16 @@ class HlsTest(unittest.TestCase):
 
     def test_segments_encode_their_audio_so_it_starts_where_the_video_does(self):
         info = {"ten_bit": True, "primaries": "bt2020", "transfer": "smpte2084", "space": "bt2020nc"}
-        cmd = burn.segment_command("film.mp4", "s.sup", 330.0, 6.0, info, "55.ts")
+        cmd = burn.segment_command("film.mp4", "s.sup", 330.0, 6.0, dict(info, audio="eac3"), "55.ts")
         self.assertEqual(cmd[cmd.index("-c:a") + 1], "eac3")
         self.assertEqual(cmd[cmd.index("-output_ts_offset") + 1], "340.000")
-        self.assertIn("copy", burn.burn_command("film.mp4", "s.sup", info, "out.mp4"))  # copies keep the audio as is
+
+    def test_copies_keep_audio_mp4_and_tvs_take_and_convert_the_rest(self):
+        info = {"ten_bit": False}
+        for codec, want in (("eac3", "copy"), ("aac", "copy"), ("ac3", "copy"), ("truehd", "eac3"), ("dts", "eac3")):
+            with self.subTest(codec=codec):
+                cmd = burn.burn_command("film.mkv", "s.sup", dict(info, audio=codec), "out.mp4")
+                self.assertEqual(cmd[cmd.index("-c:a") + 1], want)
 
     def session(self, encode):
         tmp = tempfile.TemporaryDirectory()
@@ -326,7 +332,7 @@ class BurnPlaybackTest(BurnCase):
         with mock.patch.object(burn, "burn_command", side_effect=fake), \
                 mock.patch.object(appmod.subprocess, "Popen", side_effect=popen):
             self.assertEqual(self.app.start_burn(self.film), {"started": True})
-            self.app._burn(self.film, self.track["path"])  # what the background thread runs
+            self.app._burn(self.film, self.track["path"], self.track["path"])  # what the background thread runs
         return self.app.status()["burns"][0]
 
     def test_burn_job_reports_progress_and_leaves_a_finished_copy(self):
@@ -430,3 +436,62 @@ class ReviewFixesTest(BurnCase):
         self.assertIsNone(self.app.subtitle_status(self.app.current)["copy"])
         self.app.open_movie(self.film.id, subtitle="Film.srt")
         self.assertEqual(self.app.subtitle_status(self.app.current)["copy"], 11)
+
+
+class LifecycleTest(BurnCase):
+    """Copies survive upgrades, HLS sessions end with their playback, and leftovers go at start."""
+
+    def test_a_copy_is_found_by_the_chosen_file_even_when_its_converted_version_moves(self):
+        self.make_copy()
+        with mock.patch.object(appmod, "prepare", return_value="/cache/converted-by-another-version.srt"):
+            self.app.open_movie(self.film.id)
+        self.assertEqual(self.calls[0][1], self.url("copy"))
+
+    def test_stopping_ends_the_hls_session(self):
+        self.app.open_movie(self.film.id)
+        session = self.app.hls
+        self.app.control("stop", {})
+        self.assertIsNone(self.app.hls)
+        self.assertTrue(session.stopped)
+
+    def test_plain_or_copy_playback_ends_the_hls_session(self):
+        self.app.open_movie(self.film.id)
+        session = self.app.hls
+        with mock.patch.object(appmod, "transport_status", return_value=dict(position=60.0)):
+            self.app.switch_subtitles("off")
+        self.assertTrue(session.stopped)
+        self.assertIsNone(self.app.hls)
+        self.app.open_movie(self.film.id, subtitle="1")
+        self.make_copy()
+        session = self.app.hls
+        self.app.open_movie(self.film.id)  # the copy now
+        self.assertTrue(session.stopped)
+
+    def test_choosing_another_tv_ends_the_hls_session(self):
+        self.app.open_movie(self.film.id)
+        session = self.app.hls
+        self.app.state.update_tv("tv2", id="tv2", name="Other TV", ip="192.0.2.11", manufacturer="Sony", services={})
+        self.app.select("tv2")
+        self.assertTrue(session.stopped)
+
+    def test_after_a_restart_the_tv_keeps_getting_its_hls_segments(self):
+        url = self.url("hls")
+        reply = dict(state="PLAYING", uri=url, position=100.0, duration=8700.0)
+        with mock.patch.object(appmod, "transport_status", return_value=reply):
+            segment = self.app.hls_file("/hls/%s/%s/17.ts" % (self.film.id, self.track["id"]))
+        self.assertEqual(segment, ("/segments/17.ts", "video/mp2t"))
+        self.assertTrue(self.app.current.hls)
+
+    def test_start_up_removes_unfinished_copies_and_hls_segments(self):
+        os.makedirs(self.burned_dir)
+        for name in ("a-1.part.mp4", "b-2.mp4"):
+            with open(os.path.join(self.burned_dir, name), "w") as f:
+                f.write("x")
+        cache = os.path.join(self.root, "cache")
+        os.makedirs(os.path.join(cache, "hls", "key"))
+        with mock.patch.object(burn, "CACHE", cache):
+            notes = list(burn.clean_up())
+        self.assertEqual(len(notes), 1)
+        self.assertIn("a-1.part.mp4", notes[0])
+        self.assertEqual(os.listdir(self.burned_dir), ["b-2.mp4"])
+        self.assertFalse(os.path.exists(os.path.join(cache, "hls")))
