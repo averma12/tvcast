@@ -467,7 +467,7 @@ function renderSubtitles(subs) {
 function renderBurn(now) {
   const drawn = now?.subtitles.drawn;
   const job = now && st.burns.find(j => j.id === now.id);
-  const copy = now && st.copies.filter(c => c.id === now.id).reduce((n, c) => n + c.size, 0);
+  const copy = now?.subtitles.copy;  // a copy with the subtitles now chosen, not any other track's
   $('burnctl').hidden = !drawn && !job?.running;
   if ($('burnctl').hidden) return;
   $('burnlabel').textContent = (drawn === 'copy' ? 'Burned in · Copy' : drawn === 'hls' ? 'Burned in · HLS (encoded as it plays)' : 'Burned in')

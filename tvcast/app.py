@@ -526,7 +526,8 @@ class App:
                     raise ValueError("choose which subtitles to show:\n  %s" % "\n  ".join(t["label"] for t in tracks))
             else:
                 track = match_track(tracks, choice)
-            if not is_samsung(pb.tv):
+            # Burned-in subtitles are in the pixels, so changing them means loading another video.
+            if not is_samsung(pb.tv) or subtitle_mode(pb.tv) == "burn":
                 choice = track["id"] if track else "off"
                 if choice == (pb.subtitle["id"] if pb.subtitle else "off"):
                     self.remember_subtitle(pb.movie, track)
@@ -615,6 +616,7 @@ class App:
             "live": is_samsung(pb.tv) and not pb.drawn,  # switches in place; otherwise by reloading the video
             "drawn": ("hls" if pb.hls else "copy") if pb.drawn else None,
             "burn": subtitle_mode(pb.tv) == "burn",  # the TV shows no subtitles, not even the video's own
+            "copy": self.copy_size(pb.movie, pb.subtitle),  # bytes of a finished copy with these subtitles
             "selected": pb.subtitle["id"] if pb.subtitle else None,
             "tracks": [
                 {k: t[k] for k in ("id", "label", "lang", "added", "missing")}
@@ -697,7 +699,15 @@ class App:
         if source is None:
             return None
         movie, track, srt, segment = source
-        session = self.hls_session(movie, track, srt)
+        with self.lock:
+            current, pb = self.hls, self.current
+        if current is not None and (current.movie.id, current.track) == (movie.id, track["id"]):
+            session = current
+        elif pb is None or (pb.hls and (pb.movie.id, pb.subtitle["id"]) == (movie.id, track["id"])):
+            # The movie being opened, or a TV still playing after TV Cast restarted.
+            session = self.hls_session(movie, track, srt)
+        else:
+            return None  # a request left over from what played before: don't disturb what plays now
         if segment is None:
             return burn.playlist(session.duration).encode(), "application/vnd.apple.mpegurl"
         return session.segment(segment), "video/mp2t"
@@ -710,6 +720,16 @@ class App:
             return None
         elapsed = time.time() - job["started"]
         return "ready around %s" % time.strftime("%H:%M", time.localtime(job["started"] + elapsed / job["progress"]))
+
+    def copy_size(self, movie, track):
+        """Bytes of the finished copy of movie with subtitle file track burned in, or None."""
+        if track is None or track.get("missing"):
+            return None
+        try:
+            path = burn.burned(movie, prepare(track["path"], self.subtitle_cache))
+        except (OSError, ValueError):
+            return None
+        return os.path.getsize(path) if path else None
 
     def copies(self):
         """The burned-in copies on disk, as the panel lists them."""
@@ -1043,7 +1063,9 @@ class App:
 
     # Panel API
 
-    def movie_info(self, movie):
+    def movie_info(self, movie, copied=None):
+        """The panel's record of movie; copied is the set of movie ids with copies (status() scans
+        the copies folder once for all movies)."""
         saved = self.state.movie(movie.path)
         info = self.probe_info(movie)
         with self.lock:
@@ -1057,7 +1079,7 @@ class App:
             "title": movie.title,
             "year": movie.year,
             "subs": {"count": len(tracks) + len(embedded), "languages": sorted(languages - {None})},
-            "copy": any(c["id"] == movie.id for c in self.copies()),
+            "copy": movie.id in (copied if copied is not None else {c["id"] for c in self.copies()}),
             "position": saved.get("position", 0),
             "duration": saved.get("duration") or (info or {}).get("duration"),
             "watched": saved.get("watched", False),
@@ -1078,6 +1100,7 @@ class App:
             job["eta"] = self.burn_eta(job["id"])
         movies = [m for m in movies if m.root in libraries]
         available = {m.id for m in movies}
+        copies = self.copies()
         groups = []
         for m in movies:  # already in display order
             if not groups or groups[-1]["id"] != m.group:
@@ -1090,13 +1113,13 @@ class App:
             "queue": [dict(item, available=item["id"] in available) for item in queued],
             "queue_error": queue_error,
             "burns": burns,
-            "copies": self.copies(),
+            "copies": copies,
             "libraries": [
                 {"path": p, "name": os.path.basename(p) or p, "problems": problems.get(p, []), "private": private.get(p, [])}
                 for p in libraries
             ],
             "groups": groups,
-            "library": [self.movie_info(m) for m in movies],
+            "library": [self.movie_info(m, {c["id"] for c in copies}) for m in movies],
             "scanning": scanning,
             "checking": checking,
             "tvs": tv_list(self.state.tvs()),

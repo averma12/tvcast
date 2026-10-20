@@ -25,13 +25,11 @@ import tempfile
 import threading
 import time
 
-from .library import FFPROBE
+from .library import BURNED_DIR, FFPROBE
+from .subtitles import decode
 
 FFMPEG = shutil.which("ffmpeg", path=os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin")
 CACHE = os.path.expanduser("~/Library/Caches/tvcast")
-# Burned copies are about as big as their source, so they live with the user's movies rather than
-# in a cache macOS may purge.
-BURNED_DIR = os.path.expanduser("~/Movies/TV Cast subtitles")
 RENDER_SRC = os.path.join(os.path.dirname(os.path.realpath(__file__)), "render.swift")
 PQ_TEXT = 0.58  # text gray for HDR10 (PQ) video: about 200 nits, where full white would glare
 QUALITY = 85  # hevc_videotoolbox -q:v; measured SSIM 0.987 against a 4K HDR source at about its bitrate
@@ -50,6 +48,18 @@ def available():
     if not shutil.which("swiftc", path="/usr/bin"):
         return "burning in subtitles needs the Command Line Tools (xcode-select --install)"
     return None
+
+
+def read_text(path):
+    """A subtitle file's text. subtitles.prepare() leaves legacy code pages as they are (Samsung
+    players detect them), so text that isn't UTF-8 is read as Windows-1252, else Latin-1."""
+    with open(path, "rb") as f:
+        data = f.read()
+    text, encoding = decode(data)
+    if encoding != "utf-8":
+        with contextlib.suppress(UnicodeDecodeError):
+            text = data.decode("cp1252")
+    return text
 
 
 def parse_srt(text):
@@ -131,19 +141,24 @@ def prepare(movie, srt):
     sup = os.path.join(CACHE, "subs", hashlib.sha1(key.encode()).hexdigest()[:16] + ".sup")
     if not os.path.exists(sup):
         os.makedirs(os.path.dirname(sup), exist_ok=True)
-        with open(srt, encoding="utf-8-sig", errors="replace") as f:
-            cues = parse_srt(f.read())
+        cues = parse_srt(read_text(srt))
         if not cues:
             raise ValueError("%s has no subtitles that could be read" % os.path.basename(srt))
         with tempfile.NamedTemporaryFile("w", suffix=".tsv", dir=CACHE, delete=False, encoding="utf-8") as f:
             for start, end, text in cues:
                 f.write("%.3f\t%.3f\t%s\n" % (start, end, text.replace("\t", " ").replace("\n", "\\n")))
+        # A copy and HLS can draw the same subtitles at once: each renders to its own file, and
+        # the rename installs either (they are the same).
+        fd, part = tempfile.mkstemp(suffix=".part", dir=os.path.dirname(sup))
+        os.close(fd)
         try:
-            subprocess.run([renderer(), f.name, sup + ".part", str(info["width"]), str(info["height"]), str(brightness)],
+            subprocess.run([renderer(), f.name, part, str(info["width"]), str(info["height"]), str(brightness)],
                            check=True, capture_output=True, timeout=600)
+            os.replace(part, sup)
         finally:
             os.remove(f.name)
-        os.replace(sup + ".part", sup)
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(part)
     return sup, info
 
 

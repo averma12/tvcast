@@ -17,6 +17,8 @@ from tvcast import burn
 from tvcast.library import scan_library
 
 REAL_POPEN = subprocess.Popen  # the playback tests patch Popen; the burn-job tests run real shells
+REAL_PREPARE = burn.prepare  # the playback tests patch prepare and Thread; one test needs both for real
+REAL_THREAD = __import__("threading").Thread
 SRT = "1\n00:01:17,936 --> 00:01:21,212\nHi.\n"
 
 
@@ -154,7 +156,10 @@ class FakeHls:
         self.stopped = True
 
 
-class BurnPlaybackTest(unittest.TestCase):
+class BurnCase(unittest.TestCase):
+    """A library with two movies and their .srt files, a TV that burns subtitles in, and the
+    TV, encoders and threads replaced."""
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -210,6 +215,9 @@ class BurnPlaybackTest(unittest.TestCase):
         with open(burn.burned_path(self.film, self.track["path"]), "w") as f:
             f.write("burned copy")
 
+
+
+class BurnPlaybackTest(BurnCase):
     def test_without_a_copy_it_plays_hls_and_makes_no_copy(self):
         self.app.state.update_movie(self.film.path, position=430)
         self.app.open_movie(self.film.id)
@@ -339,3 +347,86 @@ class BurnPlaybackTest(unittest.TestCase):
         self.assertRegex(self.app.burn_eta(self.film.id), r"^ready around \d\d:\d\d$")
         self.app.burns[self.film.id]["progress"] = 0.01
         self.assertIsNone(self.app.burn_eta(self.film.id))
+
+
+class ReviewFixesTest(BurnCase):
+    """Fixes from the first review of the burn-in change."""
+
+    def test_legacy_code_page_subtitles_render_as_text(self):
+        path = os.path.join(self.root, "legacy.srt")
+        with open(path, "wb") as f:
+            f.write(b"1\n00:00:01,000 --> 00:00:02,000\nCaf\xe9 \x93hi\x94\n")
+        self.assertEqual(burn.parse_srt(burn.read_text(path)), [(1.0, 2.0, "Café “hi”")])
+
+    def test_concurrent_drawing_of_the_same_subtitles_doesnt_collide(self):
+        script = os.path.join(self.root, "render.sh")
+        with open(script, "w") as f:
+            f.write("#!/bin/sh\nsleep 0.2\necho drawn > \"$2\"\n")
+        os.chmod(script, 0o755)
+        cache = os.path.join(self.root, "cache")
+        results, errors = [], []
+        with mock.patch.object(burn, "prepare", REAL_PREPARE), mock.patch.object(burn, "CACHE", cache), \
+                mock.patch.object(appmod.subprocess, "Popen", REAL_POPEN), \
+                mock.patch.object(burn, "renderer", return_value=script), \
+                mock.patch.object(burn, "video_info", return_value={"width": 1920, "height": 1080, "transfer": None,
+                                                                    "duration": 60.0}):
+            def run():
+                try:
+                    results.append(burn.prepare(self.film, self.track["path"])[0])
+                except Exception as e:  # noqa: BLE001 - reported below
+                    errors.append(e)
+            threads = [REAL_THREAD(target=run) for _ in range(2)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(set(results)), 1)
+        with open(results[0]) as f:
+            self.assertEqual(f.read(), "drawn\n")
+        self.assertEqual([n for n in os.listdir(os.path.dirname(results[0])) if n.endswith(".part")], [])
+
+    def test_the_copies_folder_is_not_scanned_as_movies(self):
+        burned = os.path.join(self.root, "TV Cast subtitles")
+        os.makedirs(burned)
+        with open(os.path.join(burned, "abc-def.part.mp4"), "w") as f:
+            f.write("half a copy")
+        with mock.patch("tvcast.library.BURNED_DIR", burned):
+            movies, _, _ = scan_library([self.root])
+        self.assertEqual(sorted(m.title for m in movies), ["Film", "Other"])
+
+    def test_a_stale_hls_request_doesnt_replace_the_playing_session(self):
+        self.app.open_movie(self.film.id)
+        old = "/hls/%s/%s/3.ts" % (self.film.id, self.track["id"])
+        self.app.open_movie(self.other.id)
+        playing = self.app.hls
+        self.assertIsNone(self.app.hls_file(old))
+        self.assertIs(self.app.hls, playing)
+        self.assertFalse(playing.stopped)
+
+    def test_a_samsung_set_to_burn_reloads_to_change_subtitles(self):
+        self.set_tv("Samsung Electronics")
+        self.app.control("subtitle_mode", {"mode": "burn"})
+        self.app.open_movie(self.film.id)
+        self.assertTrue(self.app.current.hls)
+        with mock.patch.object(appmod, "transport_status", return_value=dict(position=60.0)):
+            self.app.switch_subtitles("off")
+        self.assertEqual(self.calls[-3][1], "http://192.0.2.20:8765/media/%s.mp4" % self.film.id)
+        appmod.set_caption.assert_not_called()
+
+    def test_status_scans_the_copies_folder_once(self):
+        with mock.patch.object(self.app, "copies", wraps=self.app.copies) as copies:
+            self.app.status()
+        self.assertEqual(copies.call_count, 1)
+
+    def test_a_copy_counts_only_for_the_subtitles_it_has(self):
+        self.make_copy()
+        with open(os.path.join(self.root, "Film.fr.srt"), "w") as f:
+            f.write(SRT)
+        self.app.movies, _, _ = scan_library([self.root])
+        self.app.by_id = {m.id: m for m in self.app.movies}
+        self.film = self.app.by_id[self.film.id]
+        self.app.open_movie(self.film.id, subtitle="french")
+        self.assertIsNone(self.app.subtitle_status(self.app.current)["copy"])
+        self.app.open_movie(self.film.id, subtitle="Film.srt")
+        self.assertEqual(self.app.subtitle_status(self.app.current)["copy"], 11)
